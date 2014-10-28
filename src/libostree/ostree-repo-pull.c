@@ -1314,17 +1314,10 @@ ostree_repo_pull_one_dir (OstreeRepo               *self,
       }
     else if (tls_client_cert_path)
       {
-        gs_unref_object GTlsCertificate *client_cert = NULL;
-
         g_assert (tls_client_key_path);
 
-        client_cert = g_tls_certificate_new_from_files (tls_client_cert_path,
-                                                        tls_client_key_path,
-                                                        error);
-        if (!client_cert)
+        if (!_ostree_fetcher_set_client_cert (pull_data->fetcher, tls_client_cert_path, tls_client_key_path, error))
           goto out;
-
-        _ostree_fetcher_set_client_cert (pull_data->fetcher, client_cert);
       }
   }
 

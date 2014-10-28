@@ -64,8 +64,10 @@ typedef struct {
 typedef struct {
   void (*set_proxy) (OstreeFetcher *fetcher,
                      const char    *proxy);
-  void (*set_client_cert) (OstreeFetcher *fetcher,
-                           GTlsCertificate *cert);
+  gboolean (*set_client_cert) (OstreeFetcher *fetcher,
+                               const char *client_cert_path,
+                               const char *client_key_path,
+                               GError     **error);
   void (*set_tls_database) (OstreeFetcher *self,
                             GTlsDatabase *db);
   char *(*query_state_text) (OstreeFetcher *self);
@@ -270,22 +272,29 @@ _ostree_fetcher_local_set_proxy (OstreeFetcher *self,
     }
 }
 
-static void
+static gboolean
 _ostree_fetcher_local_set_client_cert (OstreeFetcher *fetcher,
-                                       GTlsCertificate *cert)
+                                       const char *client_cert_path,
+                                       const char *client_key_path,
+                                       GError      **error)
 {
   g_clear_object (&fetcher->client_cert);
-  fetcher->client_cert = g_object_ref (cert);
-  if (fetcher->client_cert)
-    {
+
+  fetcher->client_cert = g_tls_certificate_new_from_files (client_cert_path,
+                                                           client_key_path,
+                                                           error);
+  if (! fetcher->client_cert)
+    return FALSE;
+
 #ifdef HAVE_LIBSOUP_CLIENT_CERTS
-      gs_unref_object GTlsInteraction *interaction =
-        (GTlsInteraction*)_ostree_tls_cert_interaction_new (fetcher->client_cert);
-      g_object_set (fetcher->session, "tls-interaction", interaction, NULL);
+  gs_unref_object GTlsInteraction *interaction =
+    (GTlsInteraction*)_ostree_tls_cert_interaction_new (fetcher->client_cert);
+  g_object_set (fetcher->session, "tls-interaction", interaction, NULL);
 #else
-      g_warning ("This version of OSTree is compiled without client side certificate support");
+  g_warning ("This version of OSTree is compiled without client side certificate support");
 #endif
-    }
+
+  return TRUE;
 }
 
 static void
@@ -815,10 +824,12 @@ void _ostree_fetcher_set_proxy (OstreeFetcher *fetcher,
   return fetcher->backend->set_proxy (fetcher, proxy);
 }
 
-void _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
-                                     GTlsCertificate *cert)
+gboolean _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
+                                          const char *client_cert_path,
+                                          const char *client_key_path,
+                                          GError     **error)
 {
-  fetcher->backend->set_client_cert (fetcher, cert);
+  return fetcher->backend->set_client_cert (fetcher, client_cert_path, client_key_path, error);
 }
 
 void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
