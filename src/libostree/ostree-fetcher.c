@@ -60,6 +60,42 @@ typedef struct {
   GSimpleAsyncResult *result;
 } OstreeFetcherPendingURI;
 
+
+typedef struct {
+  void (*set_proxy) (OstreeFetcher *fetcher,
+                     const char    *proxy);
+  void (*set_client_cert) (OstreeFetcher *fetcher,
+                           GTlsCertificate *cert);
+  void (*set_tls_database) (OstreeFetcher *self,
+                            GTlsDatabase *db);
+  char *(*query_state_text) (OstreeFetcher *self);
+
+  guint64 (*bytes_transferred) (OstreeFetcher *self);
+
+  guint (*get_n_requests) (OstreeFetcher *self);
+
+  void (*request_uri_with_partial_async) (OstreeFetcher *self,
+                                          SoupURI *uri,
+                                          guint64 max_size,
+                                          GCancellable *cancellable,
+                                          GAsyncReadyCallback callback,
+                                          gpointer user_data);
+  GFile *(*request_uri_with_partial_finish) (OstreeFetcher *self,
+                                             GAsyncResult  *result,
+                                             GError       **error);
+  void (*stream_uri_async) (OstreeFetcher         *self,
+                            SoupURI               *uri,
+                            guint64                max_size,
+                            GCancellable          *cancellable,
+                            GAsyncReadyCallback    callback,
+                            gpointer               user_data);
+  GInputStream *(*stream_uri_finish) (OstreeFetcher *self,
+                                      GAsyncResult  *result,
+                                      GError        **error);
+} OstreeFetcherBackend;
+
+static OstreeFetcherBackend _backend_local;
+
 static void
 pending_uri_free (OstreeFetcherPendingURI *pending)
 {
@@ -101,6 +137,8 @@ struct OstreeFetcher
   gint outstanding;
   GQueue pending_queue;
   gint max_outstanding;
+
+  OstreeFetcherBackend *backend;
 };
 
 G_DEFINE_TYPE (OstreeFetcher, _ostree_fetcher, G_TYPE_OBJECT)
@@ -200,6 +238,7 @@ _ostree_fetcher_init (OstreeFetcher *self)
   self->message_to_request = g_hash_table_new_full (NULL, NULL, (GDestroyNotify)g_object_unref,
                                                     (GDestroyNotify)pending_uri_free);
   self->output_stream_set = g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify)g_object_unref);
+  self->backend = &_backend_local;
 }
 
 OstreeFetcher *
@@ -215,9 +254,9 @@ _ostree_fetcher_new (GFile                    *tmpdir,
   return self;
 }
 
-void
-_ostree_fetcher_set_proxy (OstreeFetcher *self,
-                           const char    *http_proxy)
+static void
+_ostree_fetcher_local_set_proxy (OstreeFetcher *self,
+                                 const char    *http_proxy)
 {
   SoupURI *proxy_uri = soup_uri_new (http_proxy);
   if (!proxy_uri)
@@ -231,9 +270,9 @@ _ostree_fetcher_set_proxy (OstreeFetcher *self,
     }
 }
 
-void
-_ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
-                                GTlsCertificate *cert)
+static void
+_ostree_fetcher_local_set_client_cert (OstreeFetcher *fetcher,
+                                       GTlsCertificate *cert)
 {
   g_clear_object (&fetcher->client_cert);
   fetcher->client_cert = g_object_ref (cert);
@@ -249,9 +288,9 @@ _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
     }
 }
 
-void
-_ostree_fetcher_set_tls_database (OstreeFetcher *self,
-                                  GTlsDatabase  *db)
+static void
+_ostree_fetcher_local_set_tls_database (OstreeFetcher *self,
+                                        GTlsDatabase  *db)
 {
   if (db)
     g_object_set ((GObject*)self->session, "tls-database", db, NULL);
@@ -555,13 +594,13 @@ ostree_fetcher_request_uri_internal (OstreeFetcher         *self,
   return pending;
 }
 
-void
-_ostree_fetcher_request_uri_with_partial_async (OstreeFetcher         *self,
-                                               SoupURI               *uri,
-                                               guint64                max_size,
-                                               GCancellable          *cancellable,
-                                               GAsyncReadyCallback    callback,
-                                               gpointer               user_data)
+static void
+_ostree_fetcher_local_request_uri_with_partial_async (OstreeFetcher         *self,
+                                                      SoupURI               *uri,
+                                                      guint64                max_size,
+                                                      GCancellable          *cancellable,
+                                                      GAsyncReadyCallback    callback,
+                                                      gpointer               user_data)
 {
   OstreeFetcherPendingURI *pending;
   gs_unref_object GFileInfo *file_info = NULL;
@@ -571,7 +610,7 @@ _ostree_fetcher_request_uri_with_partial_async (OstreeFetcher         *self,
 
   pending = ostree_fetcher_request_uri_internal (self, uri, FALSE, max_size, cancellable,
                                                  callback, user_data,
-                                                 _ostree_fetcher_request_uri_with_partial_async);
+                                                 _ostree_fetcher_local_request_uri_with_partial_async);
 
   if (!ot_gfile_query_info_allow_noent (pending->out_tmpfile, OSTREE_GIO_FAST_QUERYINFO,
                                         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
@@ -601,15 +640,15 @@ _ostree_fetcher_request_uri_with_partial_async (OstreeFetcher         *self,
     }
 }
 
-GFile *
-_ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher         *self,
-                                                GAsyncResult          *result,
-                                                GError               **error)
+static GFile *
+_ostree_fetcher_local_request_uri_with_partial_finish (OstreeFetcher         *self,
+                                                       GAsyncResult          *result,
+                                                       GError               **error)
 {
   GSimpleAsyncResult *simple;
   OstreeFetcherPendingURI *pending;
 
-  g_return_val_if_fail (g_simple_async_result_is_valid (result, (GObject*)self, _ostree_fetcher_request_uri_with_partial_async), FALSE);
+  g_return_val_if_fail (g_simple_async_result_is_valid (result, (GObject*)self, _ostree_fetcher_local_request_uri_with_partial_async), FALSE);
 
   simple = G_SIMPLE_ASYNC_RESULT (result);
   if (g_simple_async_result_propagate_error (simple, error))
@@ -619,13 +658,13 @@ _ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher         *self,
   return g_object_ref (pending->out_tmpfile);
 }
 
-void
-_ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
-                                 SoupURI               *uri,
-                                 guint64                max_size,
-                                 GCancellable          *cancellable,
-                                 GAsyncReadyCallback    callback,
-                                 gpointer               user_data)
+static void
+_ostree_fetcher_local_stream_uri_async (OstreeFetcher         *self,
+                                        SoupURI               *uri,
+                                        guint64                max_size,
+                                        GCancellable          *cancellable,
+                                        GAsyncReadyCallback    callback,
+                                        gpointer               user_data)
 {
   OstreeFetcherPendingURI *pending;
 
@@ -633,7 +672,7 @@ _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
 
   pending = ostree_fetcher_request_uri_internal (self, uri, TRUE, max_size, cancellable,
                                                  callback, user_data,
-                                                 _ostree_fetcher_stream_uri_async);
+                                                 _ostree_fetcher_local_stream_uri_async);
 
   if (SOUP_IS_REQUEST_HTTP (pending->request))
     {
@@ -646,15 +685,15 @@ _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
                            on_request_sent, pending);
 }
 
-GInputStream *
-_ostree_fetcher_stream_uri_finish (OstreeFetcher         *self,
-                                  GAsyncResult          *result,
-                                  GError               **error)
+static GInputStream *
+_ostree_fetcher_local_stream_uri_finish (OstreeFetcher         *self,
+                                         GAsyncResult          *result,
+                                         GError               **error)
 {
   GSimpleAsyncResult *simple;
   OstreeFetcherPendingURI *pending;
 
-  g_return_val_if_fail (g_simple_async_result_is_valid (result, (GObject*)self, _ostree_fetcher_stream_uri_async), FALSE);
+  g_return_val_if_fail (g_simple_async_result_is_valid (result, (GObject*)self, _ostree_fetcher_local_stream_uri_async), FALSE);
 
   simple = G_SIMPLE_ASYNC_RESULT (result);
   if (g_simple_async_result_propagate_error (simple, error))
@@ -677,8 +716,8 @@ format_size_pair (guint64 start,
                             ((double) max) / 1024);
 }
 
-char *
-_ostree_fetcher_query_state_text (OstreeFetcher              *self)
+static char *
+_ostree_fetcher_local_query_state_text (OstreeFetcher              *self)
 {
   guint n_active;
 
@@ -727,8 +766,8 @@ _ostree_fetcher_query_state_text (OstreeFetcher              *self)
     return g_strdup_printf ("Idle");
 }
 
-guint64
-_ostree_fetcher_bytes_transferred (OstreeFetcher       *self)
+static guint64
+_ostree_fetcher_local_bytes_transferred (OstreeFetcher       *self)
 {
   guint64 ret = self->total_downloaded;
   GHashTableIter hiter;
@@ -750,8 +789,96 @@ _ostree_fetcher_bytes_transferred (OstreeFetcher       *self)
   return ret;
 }
 
-guint
-_ostree_fetcher_get_n_requests (OstreeFetcher       *self)
+static guint
+_ostree_fetcher_local_get_n_requests (OstreeFetcher       *self)
 {
   return self->total_requests;
 }
+
+static OstreeFetcherBackend _backend_local = {
+  .set_proxy = _ostree_fetcher_local_set_proxy,
+  .set_client_cert = _ostree_fetcher_local_set_client_cert,
+  .set_tls_database = _ostree_fetcher_local_set_tls_database,
+  .query_state_text = _ostree_fetcher_local_query_state_text,
+  .bytes_transferred = _ostree_fetcher_local_bytes_transferred,
+  .get_n_requests = _ostree_fetcher_local_get_n_requests,
+  .request_uri_with_partial_async = _ostree_fetcher_local_request_uri_with_partial_async,
+  .request_uri_with_partial_finish = _ostree_fetcher_local_request_uri_with_partial_finish,
+  .stream_uri_async = _ostree_fetcher_local_stream_uri_async,
+  .stream_uri_finish = _ostree_fetcher_local_stream_uri_finish,
+
+};
+
+void _ostree_fetcher_set_proxy (OstreeFetcher *fetcher,
+                                const char    *proxy)
+{
+  return fetcher->backend->set_proxy (fetcher, proxy);
+}
+
+void _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
+                                     GTlsCertificate *cert)
+{
+  fetcher->backend->set_client_cert (fetcher, cert);
+}
+
+void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
+                                       GTlsDatabase *db)
+{
+  self->backend->set_tls_database (self, db);
+}
+
+char * _ostree_fetcher_query_state_text (OstreeFetcher *self)
+{
+  return self->backend->query_state_text (self);
+}
+
+guint64 _ostree_fetcher_bytes_transferred (OstreeFetcher *self)
+{
+  return self->backend->bytes_transferred (self);
+}
+
+guint _ostree_fetcher_get_n_requests (OstreeFetcher *self)
+{
+  return self->backend->get_n_requests (self);
+}
+
+void _ostree_fetcher_request_uri_with_partial_async (OstreeFetcher         *self,
+                                                     SoupURI               *uri,
+                                                     guint64                max_size,
+                                                     GCancellable          *cancellable,
+                                                     GAsyncReadyCallback    callback,
+                                                     gpointer               user_data)
+{
+  self->backend->request_uri_with_partial_async (self, uri, max_size,
+                                                 cancellable, callback,
+                                                 user_data);
+}
+
+GFile *_ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher *self,
+                                                        GAsyncResult  *result,
+                                                        GError       **error)
+{
+  return self->backend->request_uri_with_partial_finish (self, result, error);
+
+}
+
+void _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
+                                       SoupURI               *uri,
+                                       guint64                max_size,
+                                       GCancellable          *cancellable,
+                                       GAsyncReadyCallback    callback,
+                                       gpointer               user_data)
+{
+  return self->backend->stream_uri_async (self, uri, max_size, cancellable,
+                                          callback, user_data);
+
+}
+
+
+GInputStream *_ostree_fetcher_stream_uri_finish (OstreeFetcher *self,
+                                                 GAsyncResult  *result,
+                                                 GError        **error)
+{
+  return self->backend->stream_uri_finish (self, result, error);
+}
+
