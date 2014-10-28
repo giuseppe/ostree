@@ -62,8 +62,9 @@ gboolean _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
                                           const char *client_key_path,
                                           GError     **error);
 
-void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
-                                       GTlsDatabase *db);
+gboolean _ostree_fetcher_set_tls_database (OstreeFetcher *self,
+                                           const char *database_path,
+                                           GError     **error);
 
 char * _ostree_fetcher_query_state_text (OstreeFetcher              *self);
 

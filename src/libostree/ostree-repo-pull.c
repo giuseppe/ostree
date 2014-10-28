@@ -1323,7 +1323,6 @@ ostree_repo_pull_one_dir (OstreeRepo               *self,
 
   {
     gs_free char *tls_ca_path = NULL;
-    gs_unref_object GTlsDatabase *db = NULL;
 
     if (!ot_keyfile_get_value_with_default (config, remote_key,
                                             "tls-ca-path",
@@ -1332,11 +1331,7 @@ ostree_repo_pull_one_dir (OstreeRepo               *self,
 
     if (tls_ca_path)
       {
-        db = g_tls_file_database_new (tls_ca_path, error);
-        if (!db)
-          goto out;
-        
-        _ostree_fetcher_set_tls_database (pull_data->fetcher, db);
+        _ostree_fetcher_set_tls_database (pull_data->fetcher, tls_ca_path, error);
       }
   }
 

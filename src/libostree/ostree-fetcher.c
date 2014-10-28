@@ -68,8 +68,9 @@ typedef struct {
                                const char *client_cert_path,
                                const char *client_key_path,
                                GError     **error);
-  void (*set_tls_database) (OstreeFetcher *self,
-                            GTlsDatabase *db);
+  gboolean (*set_tls_database) (OstreeFetcher *self,
+                                const char *database_path,
+                                GError     **error);
   char *(*query_state_text) (OstreeFetcher *self);
 
   guint64 (*bytes_transferred) (OstreeFetcher *self);
@@ -297,14 +298,22 @@ _ostree_fetcher_local_set_client_cert (OstreeFetcher *fetcher,
   return TRUE;
 }
 
-static void
+static gboolean
 _ostree_fetcher_local_set_tls_database (OstreeFetcher *self,
-                                        GTlsDatabase  *db)
+                                        const char *database_path,
+                                        GError     **error)
 {
-  if (db)
-    g_object_set ((GObject*)self->session, "tls-database", db, NULL);
+  if (database_path)
+    {
+      GTlsDatabase *db = g_tls_file_database_new (database_path, error);
+      if (! db)
+        return FALSE;
+      g_object_set ((GObject*)self->session, "tls-database", db, NULL);
+    }
   else
     g_object_set ((GObject*)self->session, "ssl-use-system-ca-file", TRUE, NULL);
+
+  return TRUE;
 }
 
 static void
@@ -832,10 +841,11 @@ gboolean _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
   return fetcher->backend->set_client_cert (fetcher, client_cert_path, client_key_path, error);
 }
 
-void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
-                                       GTlsDatabase *db)
+gboolean _ostree_fetcher_set_tls_database (OstreeFetcher *self,
+                                           const char *database_path,
+                                           GError     **error)
 {
-  self->backend->set_tls_database (self, db);
+  return self->backend->set_tls_database (self, database_path, error);
 }
 
 char * _ostree_fetcher_query_state_text (OstreeFetcher *self)
