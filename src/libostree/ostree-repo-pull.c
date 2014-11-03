@@ -262,19 +262,6 @@ typedef struct {
   GInputStream   *result_stream;
 } OstreeFetchUriSyncData;
 
-static void
-fetch_uri_sync_on_complete (GObject        *object,
-                            GAsyncResult   *result,
-                            gpointer        user_data) 
-{
-  OstreeFetchUriSyncData *data = user_data;
-
-  data->result_stream = _ostree_fetcher_stream_uri_finish ((OstreeFetcher*)object,
-                                                          result, data->pull_data->async_error);
-  data->pull_data->fetching_sync_uri = NULL;
-  g_main_loop_quit (data->pull_data->loop);
-}
-
 static gboolean
 fetch_uri_contents_membuf_sync (OtPullData    *pull_data,
                                 SoupURI        *uri,
@@ -284,60 +271,24 @@ fetch_uri_contents_membuf_sync (OtPullData    *pull_data,
                                 GCancellable   *cancellable,
                                 GError        **error)
 {
-  gboolean ret = FALSE;
-  const guint8 nulchar = 0;
-  gs_free char *ret_contents = NULL;
-  gs_unref_object GMemoryOutputStream *buf = NULL;
-  OstreeFetchUriSyncData fetch_data = { 0, };
-
-  g_assert (error != NULL);
-
-  if (g_cancellable_set_error_if_cancelled (cancellable, error))
-    return FALSE;
-
-  fetch_data.pull_data = pull_data;
-
   pull_data->fetching_sync_uri = uri;
-  _ostree_fetcher_stream_uri_async (pull_data->fetcher, uri,
-                                   OSTREE_MAX_METADATA_SIZE,
-                                   cancellable,
-                                   fetch_uri_sync_on_complete, &fetch_data);
+  return fetch_uri_contents_membuf_sync_1 (pull_data->fetcher,
+                                           uri,
+                                           add_nul,
+                                           allow_noent,
+                                           out_contents,
+                                           pull_data->progress,
+                                           update_progress,
+                                           idle_check_outstanding_requests,
+                                           &pull_data->fetching_sync_uri,
+                                           pull_data->loop,
+                                           pull_data->main_context,
+                                           pull_data->async_error,
+                                           &pull_data->caught_error,
+                                           pull_data,
+                                           cancellable,
+                                           error);
 
-  run_mainloop_monitor_fetcher (pull_data);
-  if (!fetch_data.result_stream)
-    {
-      if (allow_noent)
-        {
-          if (g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
-            {
-              g_clear_error (error);
-              ret = TRUE;
-              *out_contents = NULL;
-            }
-        }
-      goto out;
-    }
-
-  buf = (GMemoryOutputStream*)g_memory_output_stream_new (NULL, 0, g_realloc, g_free);
-  if (g_output_stream_splice ((GOutputStream*)buf, fetch_data.result_stream,
-                              G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE,
-                              cancellable, error) < 0)
-    goto out;
-
-  if (add_nul)
-    {
-      if (!g_output_stream_write ((GOutputStream*)buf, &nulchar, 1, cancellable, error))
-        goto out;
-    }
-
-  if (!g_output_stream_close ((GOutputStream*)buf, cancellable, error))
-    goto out;
-
-  ret = TRUE;
-  *out_contents = g_memory_output_stream_steal_as_bytes (buf);
- out:
-  g_clear_object (&(fetch_data.result_stream));
-  return ret;
 }
 
 static gboolean

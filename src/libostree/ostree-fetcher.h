@@ -81,16 +81,33 @@ GFile *_ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher *self,
                                                        GError       **error);
 
 void _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
-                                      SoupURI               *uri,
-                                      guint64                max_size,
-                                      GCancellable          *cancellable,
-                                      GAsyncReadyCallback    callback,
-                                      gpointer               user_data);
+                                       SoupURI               *uri,
+                                       guint64                max_size,
+                                       GCancellable          *cancellable,
+                                       GAsyncReadyCallback    callback,
+                                       gpointer               user_data);
 
 GInputStream *_ostree_fetcher_stream_uri_finish (OstreeFetcher         *self,
                                                 GAsyncResult          *result,
                                                 GError               **error);
 
+gboolean
+fetch_uri_contents_membuf_sync_1 (OstreeFetcher *fetcher,
+                                  SoupURI        *uri,
+                                  gboolean       add_nul,
+                                  gboolean       allow_noent,
+                                  GBytes         **out_contents,
+                                  gpointer       progress,
+                                  GSourceFunc    update_progress,
+                                  GSourceFunc    idle_check_requests,
+                                  SoupURI        **fetching_sync_uri,
+                                  GMainLoop      *loop,
+                                  GMainContext   *main_context,
+                                  GError         **async_error,
+                                  gboolean       *caught_error,
+                                  gpointer       user_data,
+                                  GCancellable   *cancellable,
+                                  GError         **error);
 G_END_DECLS
 
 #endif
