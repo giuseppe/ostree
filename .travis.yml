@@ -1,0 +1,7 @@
+language: c
+
+sudo: false
+
+compiler: gcc
+
+script: ./autogen.sh && ./configure && make && make check
