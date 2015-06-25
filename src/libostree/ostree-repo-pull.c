@@ -1833,8 +1833,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
         if (bytes_sig)
           pull_data->summary_data_sig = g_bytes_ref (bytes_sig);
-
-        if (!bytes_sig)
+        else
           {
             g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                          "GPG verification enabled, but no summary signatures found (use gpg-verify-summary=false in remote config to disable)");
