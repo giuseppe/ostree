@@ -1087,6 +1087,7 @@ static_deltapart_fetch_on_complete (GObject           *object,
                                            pull_data->cancellable,
                                            on_static_delta_written,
                                            fetch_data);
+  free_fetch_data = FALSE;
   pull_data->n_outstanding_write_requests[FETCH_DELTAPART]++;
   free_fetch_data = FALSE;
 
@@ -2265,17 +2266,21 @@ revision_fetch_on_complete (GObject        *object,
   GError *local_error = NULL;
   GError **error = &local_error;
   GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
+  gboolean free_fetch_data = TRUE;
 
   if (!_ostree_fetcher_stream_to_membuf (input, TRUE, FALSE, (gpointer*)(&fetch_data->to_revision), pull_data->cancellable, error))
     goto out;
 
   fetch_revision (fetch_data, pull_data->cancellable, error);
+  free_fetch_data = FALSE;
 
  out:
   g_assert (pull_data->n_outstanding[FETCH_REF] > 0);
   pull_data->n_outstanding[FETCH_REF]--;
   pull_data->n_fetched[FETCH_REF]++;
   check_outstanding_requests_handle_error (pull_data, local_error);
+  if (free_fetch_data)
+    fetch_delta_superblock_data_free (fetch_data);
 }
 
 
