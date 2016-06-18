@@ -124,8 +124,9 @@ typedef struct {
 } OtPullData;
 
 typedef struct {
-  OtPullData  *pull_data;
-  GVariant    *object;
+  OtPullData       *pull_data;
+  char             *checksum;
+  OstreeObjectType  objtype;
 } FetchObjectData;
 
 typedef struct {
@@ -146,6 +147,23 @@ typedef struct {
   OstreeObjectType objtype;
   guint recursion_depth;
 } ScanObjectQueueData;
+
+static void
+fetch_object_data_free (gpointer  data)
+{
+  FetchObjectData *fetch_data = data;
+  g_free (fetch_data->checksum);
+  g_free (fetch_data);
+}
+
+static void
+fetch_static_delta_data_free (gpointer  data)
+{
+  FetchStaticDeltaData *fetch_data = data;
+  g_free (fetch_data->expected_checksum);
+  g_variant_unref (fetch_data->objects);
+  g_free (fetch_data);
+}
 
 static void
 fetch_delta_superblock_data_free (gpointer  data)
@@ -480,9 +498,9 @@ write_commitpartial_for (OtPullData *pull_data,
 }
 
 static void
-fetch_object (OtPullData        *pull_data,
-                            const char        *checksum,
-                            OstreeObjectType   objtype);
+fetch_object (OtPullData      *pull_data,
+              char            *checksum,
+              OstreeObjectType objtype);
 
 static gboolean
 scan_dirtree_object (OtPullData   *pull_data,
@@ -707,8 +725,8 @@ content_fetch_on_write_complete (GObject        *object,
   OtPullData *pull_data = fetch_data->pull_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  OstreeObjectType objtype;
-  const char *expected_checksum;
+  OstreeObjectType objtype = fetch_data->objtype;
+  const char *expected_checksum = fetch_data->checksum;
   g_autofree guchar *csum = NULL;
   g_autofree char *checksum = NULL;
   g_autofree char *checksum_obj = NULL;
@@ -719,7 +737,6 @@ content_fetch_on_write_complete (GObject        *object,
 
   checksum = ostree_checksum_from_bytes (csum);
 
-  ostree_object_name_deserialize (fetch_data->object, &expected_checksum, &objtype);
   g_assert (objtype == OSTREE_OBJECT_TYPE_FILE);
 
   checksum_obj = ostree_object_to_string (checksum, objtype);
@@ -737,8 +754,7 @@ content_fetch_on_write_complete (GObject        *object,
  out:
   pull_data->n_outstanding_write_requests[FETCH_CONTENT]--;
   check_outstanding_requests_handle_error (pull_data, local_error);
-  g_variant_unref (fetch_data->object);
-  g_free (fetch_data);
+  fetch_object_data_free (fetch_data);
 }
 
 static void
@@ -758,16 +774,15 @@ content_fetch_on_complete (GObject        *object,
   g_autoptr(GInputStream) file_in = NULL;
   g_autoptr(GInputStream) object_input = NULL;
   g_autofree char *temp_path = NULL;
-  const char *checksum;
+  OstreeObjectType objtype = fetch_data->objtype;
+  const char *checksum = fetch_data->checksum;
   g_autofree char *checksum_obj = NULL;
-  OstreeObjectType objtype;
   gboolean free_fetch_data = TRUE;
 
   temp_path = _ostree_fetcher_request_uri_with_partial_finish (fetcher, result, error);
   if (!temp_path)
     goto out;
 
-  ostree_object_name_deserialize (fetch_data->object, &checksum, &objtype);
   g_assert (objtype == OSTREE_OBJECT_TYPE_FILE);
 
   checksum_obj = ostree_object_to_string (checksum, objtype);
@@ -827,10 +842,7 @@ content_fetch_on_complete (GObject        *object,
   pull_data->n_outstanding[FETCH_CONTENT]--;
   check_outstanding_requests_handle_error (pull_data, local_error);
   if (free_fetch_data)
-    {
-      g_variant_unref (fetch_data->object);
-      g_free (fetch_data);
-    }
+    fetch_object_data_free (fetch_data);
 }
 
 static void
@@ -842,8 +854,8 @@ on_metadata_written (GObject           *object,
   OtPullData *pull_data = fetch_data->pull_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  const char *expected_checksum;
-  OstreeObjectType objtype;
+  const char *expected_checksum = fetch_data->checksum;
+  OstreeObjectType objtype = fetch_data->objtype;
   g_autofree char *checksum = NULL;
   g_autofree guchar *csum = NULL;
   g_autofree char *stringified_object = NULL;
@@ -854,7 +866,6 @@ on_metadata_written (GObject           *object,
 
   checksum = ostree_checksum_from_bytes (csum);
 
-  ostree_object_name_deserialize (fetch_data->object, &expected_checksum, &objtype);
   g_assert (OSTREE_OBJECT_TYPE_IS_META (objtype));
 
   stringified_object = ostree_object_to_string (checksum, objtype);
@@ -872,9 +883,7 @@ on_metadata_written (GObject           *object,
 
  out:
   pull_data->n_outstanding_write_requests[FETCH_METADATA]--;
-  g_variant_unref (fetch_data->object);
-  g_free (fetch_data);
-
+  fetch_object_data_free (fetch_data);
   check_outstanding_requests_handle_error (pull_data, local_error);
 }
 
@@ -888,15 +897,14 @@ meta_fetch_on_complete (GObject           *object,
   OtPullData *pull_data = fetch_data->pull_data;
   g_autoptr(GVariant) metadata = NULL;
   g_autofree char *temp_path = NULL;
-  const char *checksum;
+  OstreeObjectType objtype = fetch_data->objtype;
+  const char *checksum = fetch_data->checksum;
   g_autofree char *checksum_obj = NULL;
-  OstreeObjectType objtype;
   GError *local_error = NULL;
   GError **error = &local_error;
   glnx_fd_close int fd = -1;
   gboolean free_fetch_data = TRUE;
 
-  ostree_object_name_deserialize (fetch_data->object, &checksum, &objtype);
   checksum_obj = ostree_object_to_string (checksum, objtype);
   g_debug ("fetch of %s complete", checksum_obj);
 
@@ -966,19 +974,7 @@ meta_fetch_on_complete (GObject           *object,
   pull_data->n_fetched[FETCH_METADATA]++;
   check_outstanding_requests_handle_error (pull_data, local_error);
   if (free_fetch_data)
-    {
-      g_variant_unref (fetch_data->object);
-      g_free (fetch_data);
-    }
-}
-
-static void
-fetch_static_delta_data_free (gpointer  data)
-{
-  FetchStaticDeltaData *fetch_data = data;
-  g_free (fetch_data->expected_checksum);
-  g_variant_unref (fetch_data->objects);
-  g_free (fetch_data);
+    fetch_object_data_free (fetch_data);
 }
 
 static void
@@ -1370,7 +1366,7 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
  */
 static void
 fetch_object (OtPullData        *pull_data,
-              const char        *checksum,
+              char              *checksum,
               OstreeObjectType   objtype)
 {
   SoupURI *obj_uri = NULL;
@@ -1399,7 +1395,8 @@ fetch_object (OtPullData        *pull_data,
     }
   fetch_data = g_new0 (FetchObjectData, 1);
   fetch_data->pull_data = pull_data;
-  fetch_data->object = ostree_object_name_serialize (checksum, objtype);
+  fetch_data->checksum = checksum;
+  fetch_data->objtype = objtype;
 
   expected_max_size_p = OSTREE_OBJECT_TYPE_IS_DETACHED(objtype) ? NULL
                           : g_hash_table_lookup (pull_data->expected_commit_sizes, checksum);
@@ -1663,7 +1660,8 @@ process_one_static_delta (OtPullData   *pull_data,
 
         fetch_data = g_new0 (FetchObjectData, 1);
         fetch_data->pull_data = pull_data;
-        fetch_data->object = ostree_object_name_serialize (to_checksum, OSTREE_OBJECT_TYPE_COMMIT);
+        fetch_data->checksum = to_checksum;
+        fetch_data->objtype = OSTREE_OBJECT_TYPE_COMMIT;
 
         to_commit = g_variant_get_child_value (delta_superblock, 4);
 
