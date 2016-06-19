@@ -489,9 +489,9 @@ scan_dirtree_object (OtPullData   *pull_data,
                                                           cancellable, error))
             goto out;
         }
-      else if (!file_is_stored && !g_hash_table_lookup (pull_data->requested_content, file_checksum))
+      else if (!file_is_stored && !g_hash_table_contains (pull_data->requested_content, file_checksum))
         {
-          g_hash_table_insert (pull_data->requested_content, file_checksum, file_checksum);
+          g_hash_table_add (pull_data->requested_content, g_strdup (file_checksum));
           fetch_object (pull_data, file_checksum, OSTREE_OBJECT_TYPE_FILE);
           file_checksum = NULL;  /* Transfer ownership */
         }
@@ -709,10 +709,10 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
   tmp_checksum = ostree_checksum_from_bytes (csum);
   object = ostree_object_name_serialize (tmp_checksum, objtype);
 
-  if (g_hash_table_lookup (pull_data->scanned_metadata, object))
+  if (g_hash_table_contains (pull_data->scanned_metadata, object))
     return TRUE;
 
-  is_requested = g_hash_table_lookup (pull_data->requested_metadata, tmp_checksum) != NULL;
+  is_requested = g_hash_table_contains (pull_data->requested_metadata, tmp_checksum);
   if (!ostree_repo_has_object (pull_data->repo, objtype, tmp_checksum, &is_stored,
                                cancellable, error))
     goto out;
@@ -737,9 +737,7 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
 
   if (!is_stored && !is_requested)
     {
-      char *duped_checksum = g_strdup (tmp_checksum);
-
-      g_hash_table_insert (pull_data->requested_metadata, duped_checksum, duped_checksum);
+      g_hash_table_add (pull_data->requested_metadata, g_strdup (tmp_checksum));
 
       if (objtype == OSTREE_OBJECT_TYPE_COMMIT)
         fetch_object (pull_data, g_strdup (tmp_checksum), OSTREE_OBJECT_TYPE_COMMIT_META);
@@ -808,7 +806,7 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
               break;
             }
         }
-      g_hash_table_insert (pull_data->scanned_metadata, g_variant_ref (object), object);
+      g_hash_table_add (pull_data->scanned_metadata, g_variant_ref (object));
       pull_data->n_scanned_metadata++;
     }
 
@@ -1353,9 +1351,9 @@ process_one_static_delta_fallback (OtPullData   *pull_data,
     {
       if (OSTREE_OBJECT_TYPE_IS_META (objtype))
         {
-          if (!g_hash_table_lookup (pull_data->requested_metadata, checksum))
+          if (!g_hash_table_contains (pull_data->requested_metadata, checksum))
             {
-              g_hash_table_insert (pull_data->requested_metadata, checksum, checksum);
+              g_hash_table_add (pull_data->requested_metadata, g_strdup (checksum));
 
               /* Fetch metadata */
               if (objtype == OSTREE_OBJECT_TYPE_COMMIT)
@@ -1367,9 +1365,9 @@ process_one_static_delta_fallback (OtPullData   *pull_data,
         }
       else
         {
-          if (!g_hash_table_lookup (pull_data->requested_content, checksum))
+          if (!g_hash_table_contains (pull_data->requested_content, checksum))
             {
-              g_hash_table_insert (pull_data->requested_content, checksum, checksum);
+              g_hash_table_add (pull_data->requested_content, g_strdup (checksum));
               fetch_object (pull_data, checksum, OSTREE_OBJECT_TYPE_FILE);
               checksum = NULL;  /* Transfer ownership */
             }
@@ -2575,8 +2573,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
             if (ostree_validate_checksum_string (branch, NULL))
               {
-                char *key = g_strdup (branch);
-                g_hash_table_insert (pull_data->commits_to_fetch, key, key);
+                g_hash_table_add (pull_data->commits_to_fetch, g_strdup (branch));
               }
             else
               {
