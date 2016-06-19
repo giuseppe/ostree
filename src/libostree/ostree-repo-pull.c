@@ -1126,6 +1126,7 @@ meta_fetch_on_complete (GObject           *object,
                                 FALSE, &metadata, error))
     goto out;
 
+  /* Now delete it, see comment in corresponding content fetch path */
   (void) unlinkat (_ostree_fetcher_get_dfd (fetcher), temp_path, 0);
 
   /* Write the commitpartial file now while we're still fetching data */
@@ -1734,10 +1735,12 @@ revision_fetch_on_complete (GObject        *object,
   GError **error = &local_error;
   GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
   gboolean free_fetch_data = TRUE;
+  g_autoptr(GMemoryOutputStream) buf = NULL;
 
-  if (!_ostree_fetcher_stream_to_membuf (input, TRUE, FALSE, (gpointer*)(&fetch_data->to_revision), pull_data->cancellable, error))
+  if (!_ostree_fetcher_membuf_splice (input, TRUE, FALSE, &buf, pull_data->cancellable, error) || !buf)
     goto out;
 
+  fetch_data->to_revision = g_memory_output_stream_steal_data ( buf );
   fetch_revision (fetch_data, pull_data->cancellable, error);
   free_fetch_data = FALSE;
 
@@ -2785,7 +2788,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
                                               error))
               goto out;
           }
-
       }
 
     pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;

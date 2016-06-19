@@ -106,12 +106,12 @@ gboolean _ostree_fetcher_request_uri_to_membuf (OstreeFetcher *fetcher,
                                                 GError         **error);
 
 gboolean
-_ostree_fetcher_stream_to_membuf (GInputStream   *result_stream,
-                                  gboolean        add_nul,
-                                  gboolean        allow_noent,
-                                  gpointer       *out_contents,
-                                  GCancellable   *cancellable,
-                                  GError         **error);
+_ostree_fetcher_membuf_splice (GInputStream         *result_stream,
+                               gboolean              add_nul,
+                               gboolean              allow_noent,
+                               GMemoryOutputStream **buf,
+                               GCancellable         *cancellable,
+                               GError              **error);
 
 G_END_DECLS
 

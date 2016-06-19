@@ -1157,7 +1157,6 @@ _ostree_fetcher_request_uri_to_membuf (OstreeFetcher  *fetcher,
                                        GError         **error)
 {
   gboolean ret = FALSE;
-  const guint8 nulchar = 0;
   g_autofree char *ret_contents = NULL;
   g_autoptr(GMemoryOutputStream) buf = NULL;
   g_autoptr(GMainContext) mainctx = NULL;
@@ -1183,37 +1182,12 @@ _ostree_fetcher_request_uri_to_membuf (OstreeFetcher  *fetcher,
   while (!data.done)
     g_main_context_iteration (mainctx, TRUE);
 
-  if (!data.result_stream)
-    {
-      if (allow_noent)
-        {
-          if (g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
-            {
-              g_clear_error (error);
-              ret = TRUE;
-              *out_contents = NULL;
-            }
-        }
-      goto out;
-    }
-
-  buf = (GMemoryOutputStream*)g_memory_output_stream_new (NULL, 0, g_realloc, g_free);
-  if (g_output_stream_splice ((GOutputStream*)buf, data.result_stream,
-                              G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE,
-                              cancellable, error) < 0)
-    goto out;
-
-  if (add_nul)
-    {
-      if (!g_output_stream_write ((GOutputStream*)buf, &nulchar, 1, cancellable, error))
-        goto out;
-    }
-
-  if (!g_output_stream_close ((GOutputStream*)buf, cancellable, error))
+  if(!_ostree_fetcher_membuf_splice (data.result_stream, add_nul, allow_noent, &buf, cancellable, error))
     goto out;
 
   ret = TRUE;
-  *out_contents = g_memory_output_stream_steal_as_bytes (buf);
+  if (buf)
+    *out_contents = g_memory_output_stream_steal_as_bytes (buf);
  out:
   if (mainctx)
     g_main_context_pop_thread_default (mainctx);
@@ -1222,21 +1196,23 @@ _ostree_fetcher_request_uri_to_membuf (OstreeFetcher  *fetcher,
 }
 
 /**
- * _ostree_fetcher_stream_to_membuf:
+ * _ostree_fetcher_membuf_splice:
+ * @result_stream: Input stream
+ * @buf: (out): pointer to either NULL or a closed GMemoryOutputStream
  * Converts a GInputStream to an in-memory buffer,
- * which must be freed later with g_free.
+ * which must be freed later if non-null.
  */
 gboolean
-_ostree_fetcher_stream_to_membuf (GInputStream   *result_stream,
-                                  gboolean        add_nul,
-                                  gboolean        allow_noent,
-                                  gpointer       *out_contents,
-                                  GCancellable   *cancellable,
-                                  GError         **error)
+_ostree_fetcher_membuf_splice (GInputStream         *result_stream,
+                               gboolean              add_nul,
+                               gboolean              allow_noent,
+                               GMemoryOutputStream **buf,
+                               GCancellable         *cancellable,
+                               GError              **error)
 {
   gboolean ret = FALSE;
-  const guint8 nulchar = 0;
-  g_autoptr(GMemoryOutputStream) buf = NULL;
+  static const guint8 nulchar = 0;
+  *buf = NULL;
   g_assert (error != NULL);
 
   if (!result_stream)
@@ -1247,30 +1223,34 @@ _ostree_fetcher_stream_to_membuf (GInputStream   *result_stream,
             {
               g_clear_error (error);
               ret = TRUE;
-              *out_contents = NULL;
+              *buf = NULL;
             }
         }
       goto out;
     }
 
-  buf = (GMemoryOutputStream*)g_memory_output_stream_new_resizable ();
-  if (g_output_stream_splice ((GOutputStream*)buf, result_stream,
+  *buf = (GMemoryOutputStream*)g_memory_output_stream_new_resizable ();
+  if (g_output_stream_splice ((GOutputStream*)*buf, result_stream,
                               G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE,
                               cancellable, error) < 0)
     goto out;
 
   if (add_nul)
     {
-      if (!g_output_stream_write ((GOutputStream*)buf, &nulchar, 1, cancellable, error))
+      if (!g_output_stream_write ((GOutputStream*)*buf, &nulchar, 1, cancellable, error))
         goto out;
     }
 
-  if (!g_output_stream_close ((GOutputStream*)buf, cancellable, error))
+  if (!g_output_stream_close ((GOutputStream*)*buf, cancellable, error))
     goto out;
 
   ret = TRUE;
-  *out_contents = g_memory_output_stream_steal_data (buf);
 
  out:
+  if (!ret && *buf)
+    {
+      g_free (*buf);
+      *buf = NULL;
+    }
   return ret;
 }
