@@ -2441,6 +2441,56 @@ summary_fetch_on_complete (GObject        *object,
   check_outstanding_requests_handle_error (pull_data, local_error);
 }
 
+static gboolean
+process_summary_sig (OtPullData    *pull_data,
+                     GCancellable  *cancellable,
+                     GError       **error)
+{
+  gboolean ret = FALSE;
+  g_autoptr(GBytes) bytes_summary = NULL;
+
+  if (!pull_data->summary_data_sig && pull_data->gpg_verify_summary)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "GPG verification enabled, but no summary.sig found (use gpg-verify-summary=false in remote config to disable)");
+      goto out;
+    }
+
+  if (pull_data->summary_data_sig &&
+      !pull_data->remote_repo_local &&
+      !_ostree_repo_load_cache_summary_if_same_sig (pull_data->repo,
+                                                    pull_data->remote_name,
+                                                    pull_data->summary_data_sig,
+                                                    &bytes_summary,
+                                                    cancellable,
+                                                    error))
+    goto out;
+
+  if (bytes_summary)
+    {
+      pull_data->summary_data = g_bytes_ref (bytes_summary);
+      if (!process_summary (pull_data, cancellable, error))
+          goto out;
+    }
+  else
+    {
+      SoupURI *uri = suburi_new (pull_data->base_uri, "summary", NULL);
+      pull_data->n_outstanding[FETCH_SUMMARY]++;
+      _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                        uri,
+                                        OSTREE_MAX_METADATA_SIZE,
+                                        OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                        cancellable,
+                                        summary_fetch_on_complete,
+                                        pull_data);
+      soup_uri_free (uri);
+    }
+  pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;
+  ret = TRUE;
+ out:
+  return ret;
+}
+
 /* ------------------------------------------------------------------------------------------
  * Below is the libsoup-invariant API; these should match
  * the stub functions in the #else clause
@@ -2778,7 +2828,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
   {
     SoupURI *uri = NULL;
-    g_autoptr(GBytes) bytes_summary = NULL;
     g_autoptr(GBytes) bytes_sig = NULL;
     g_autofree char *ret_contents = NULL;
 
@@ -2794,45 +2843,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
           pull_data->summary_data_sig = g_bytes_ref (bytes_sig);
       }
 
-    if (!pull_data->summary_data_sig && pull_data->gpg_verify_summary)
-      {
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                      "GPG verification enabled, but no summary.sig found (use gpg-verify-summary=false in remote config to disable)");
-        goto out;
-      }
-
-    if (pull_data->summary_data_sig &&
-        !pull_data->remote_repo_local &&
-        !_ostree_repo_load_cache_summary_if_same_sig (self,
-                                                      remote_name_or_baseurl,
-                                                      pull_data->summary_data_sig,
-                                                      &bytes_summary,
-                                                      cancellable,
-                                                      error))
-      goto out;
-
-    if (bytes_summary)
-      pull_data->summary_data = g_bytes_ref (bytes_summary);
-
-    pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;
-
-    if (!pull_data->summary_data)
-      {
-        uri = suburi_new (pull_data->base_uri, "summary", NULL);
-        pull_data->n_outstanding[FETCH_SUMMARY]++;
-        _ostree_fetcher_stream_uri_async (pull_data->fetcher,
-                                          uri,
-                                          OSTREE_MAX_METADATA_SIZE,
-                                          OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                          cancellable,
-                                          summary_fetch_on_complete,
-                                          pull_data);
-        soup_uri_free (uri);
-      }
-    else
-      {
-        process_summary (pull_data, cancellable, error);
-      }
+    process_summary_sig (pull_data, cancellable, error);
   }
 
   /* Now await work completion */
