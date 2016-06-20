@@ -45,6 +45,7 @@ typedef enum {
   FETCH_DELTAPART,
   FETCH_DELTASUPER,
   FETCH_REF,
+  FETCH_SUMMARY,
   MAX_FETCH_TYPES
 } FetchType;
 
@@ -2393,6 +2394,46 @@ process_summary (OtPullData    *pull_data,
   return ret;
 }
 
+static void
+summary_fetch_on_complete (GObject        *object,
+                           GAsyncResult   *result,
+                           gpointer        user_data)
+{
+  OstreeFetcher *fetcher = (OstreeFetcher *)object;
+  OtPullData *pull_data = user_data;
+  GError *local_error = NULL;
+  GError **error = &local_error;
+
+  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
+  g_autoptr(GMemoryOutputStream) buf = NULL;
+
+  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+    goto out;
+
+  if (buf)
+    pull_data->summary_data = g_memory_output_stream_steal_as_bytes ( buf );
+
+  if (pull_data->summary_data && pull_data->summary_data_sig)
+    {
+      if (!pull_data->remote_repo_local &&
+          !_ostree_repo_cache_summary (pull_data->repo,
+                                        pull_data->remote_name,
+                                        pull_data->summary_data,
+                                        pull_data->summary_data_sig,
+                                        pull_data->cancellable,
+                                        error))
+        goto out;
+    }
+
+  process_summary (pull_data, pull_data->cancellable, error);
+
+ out:
+  g_assert (pull_data->n_outstanding[FETCH_SUMMARY] > 0);
+  pull_data->n_outstanding[FETCH_SUMMARY]--;
+  pull_data->n_fetched[FETCH_SUMMARY]++;
+  check_outstanding_requests_handle_error (pull_data, local_error);
+}
+
 /* ------------------------------------------------------------------------------------------
  * Below is the libsoup-invariant API; these should match
  * the stub functions in the #else clause
@@ -2766,30 +2807,25 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     if (bytes_summary)
       pull_data->summary_data = g_bytes_ref (bytes_summary);
 
+    pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;
+
     if (!pull_data->summary_data)
       {
         uri = suburi_new (pull_data->base_uri, "summary", NULL);
-        if (!fetch_uri_contents_membuf_sync (pull_data, uri, FALSE, TRUE,
-                                              &bytes_summary, cancellable, error))
-          goto out;
+        pull_data->n_outstanding[FETCH_SUMMARY]++;
+        _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                          uri,
+                                          OSTREE_MAX_METADATA_SIZE,
+                                          OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                          cancellable,
+                                          summary_fetch_on_complete,
+                                          pull_data);
         soup_uri_free (uri);
-        pull_data->summary_data = g_bytes_ref (bytes_summary);
-        if (pull_data->summary_data && pull_data->summary_data_sig)
-          {
-            if (!pull_data->remote_repo_local &&
-                !_ostree_repo_cache_summary (self,
-                                              remote_name_or_baseurl,
-                                              pull_data->summary_data,
-                                              pull_data->summary_data_sig,
-                                              cancellable,
-                                              error))
-              goto out;
-          }
       }
-
-    pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;
-
-    process_summary(pull_data, cancellable, error);
+    else
+      {
+        process_summary (pull_data, cancellable, error);
+      }
   }
 
   /* Now await work completion */
