@@ -1448,7 +1448,7 @@ process_one_static_delta (OtPullData   *pull_data,
 
         fetch_data = g_new0 (FetchObjectData, 1);
         fetch_data->pull_data = pull_data;
-        fetch_data->checksum = to_checksum;
+        fetch_data->checksum = g_strdup (to_checksum);
         fetch_data->objtype = OSTREE_OBJECT_TYPE_COMMIT;
 
         to_commit = g_variant_get_child_value (delta_superblock, 4);
