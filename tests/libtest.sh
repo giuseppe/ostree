@@ -79,6 +79,8 @@ fi
 
 if test -n "${OT_TESTS_VALGRIND:-}"; then
     CMD_PREFIX="env G_SLICE=always-malloc OSTREE_SUPPRESS_SYNCFS=1 valgrind -q --error-exitcode=1 --leak-check=full --num-callers=30 --suppressions=${test_srcdir}/glib.supp --suppressions=${test_srcdir}/ostree.supp"
+elif test -n "${OT_TESTS_RR:-}"; then
+    CMD_PREFIX="rr record"
 else
     # In some cases the LD_PRELOAD may cause obscure problems,
     # e.g. right now it breaks for me with -fsanitize=address, so
