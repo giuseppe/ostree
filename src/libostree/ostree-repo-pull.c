@@ -241,7 +241,7 @@ update_progress (gpointer user_data)
   pull_data = user_data;
 
   if (! pull_data->progress)
-    return FALSE;
+    return G_SOURCE_REMOVE;
 
   for (i = 0; i < MAX_FETCH_TYPES; i++)
     {
@@ -250,6 +250,10 @@ update_progress (gpointer user_data)
       fetched += pull_data->n_fetched[i];
       requested += pull_data->n_requested[i];
     }
+
+  if (pull_data->dry_run && outstanding_fetches != 0)
+    return G_SOURCE_CONTINUE;
+
   bytes_transferred = _ostree_fetcher_bytes_transferred (pull_data->fetcher);
   n_scanned_metadata = pull_data->n_scanned_metadata;
   start_time = pull_data->start_time;
@@ -287,10 +291,13 @@ update_progress (gpointer user_data)
   else
     ostree_async_progress_set_status (pull_data->progress, NULL);
 
-  if (pull_data->dry_run && outstanding_fetches == 0)
-    pull_data->dry_run_emitted_progress = TRUE;
+  if (pull_data->dry_run)
+    {
+      pull_data->dry_run_emitted_progress = TRUE;
+      return G_SOURCE_REMOVE;
+    }
 
-  return TRUE;
+  return G_SOURCE_CONTINUE;
 }
 
 /* The core logic function for whether we should continue the main loop */
