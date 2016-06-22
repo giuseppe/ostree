@@ -1661,19 +1661,14 @@ delta_superblock_fetch_on_complete (GObject        *object,
   GError *local_error = NULL;
   GError **error = &local_error;
   GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
+  g_autoptr(GMemoryOutputStream) buf = NULL;
   GBytes* delta_superblock_data = NULL;
 
-  if (input)
-    {
-      delta_superblock_data = g_input_stream_read_bytes ( input, OSTREE_MAX_METADATA_SIZE, pull_data->cancellable, error);
-    }
-  else
-    {
-      if (g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
-        {
-          g_clear_error (error);
-        }
-    }
+  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+    goto out;
+
+  if (buf)
+    delta_superblock_data = g_memory_output_stream_steal_as_bytes ( buf );
 
   delta_superblock_process (fetch_data, delta_superblock_data, pull_data->cancellable, error);
 
