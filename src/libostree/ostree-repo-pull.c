@@ -1672,6 +1672,7 @@ delta_superblock_fetch_on_complete (GObject        *object,
 
   delta_superblock_process (fetch_data, delta_superblock_data, pull_data->cancellable, error);
 
+ out:
   g_assert (pull_data->n_outstanding[FETCH_DELTASUPER] > 0);
   pull_data->n_outstanding[FETCH_DELTASUPER]--;
   pull_data->n_fetched[FETCH_DELTASUPER]++;
