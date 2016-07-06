@@ -46,6 +46,8 @@ typedef enum {
   FETCH_DELTASUPER,
   FETCH_REF,
   FETCH_SUMMARY,
+  FETCH_SUMMARY_SIG,
+  FETCH_METALINK,
   MAX_FETCH_TYPES
 } FetchType;
 
@@ -350,6 +352,7 @@ check_outstanding_requests_handle_error (OtPullData          *pull_data,
         {
           g_error_free (error);
         }
+      g_cancellable_cancel (pull_data->cancellable);
     }
 }
 
@@ -2487,6 +2490,34 @@ process_summary_sig (OtPullData    *pull_data,
   return ret;
 }
 
+static void
+summary_sig_fetch_on_complete (GObject        *object,
+                               GAsyncResult   *result,
+                               gpointer        user_data)
+{
+  OstreeFetcher *fetcher = (OstreeFetcher *)object;
+  OtPullData *pull_data = user_data;
+  GError *local_error = NULL;
+  GError **error = &local_error;
+
+  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
+  g_autoptr(GMemoryOutputStream) buf = NULL;
+
+  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+    goto out;
+
+  if (buf)
+    pull_data->summary_data_sig = g_memory_output_stream_steal_as_bytes ( buf );
+
+  process_summary_sig (pull_data, pull_data->cancellable, error);
+
+ out:
+  g_assert (pull_data->n_outstanding[FETCH_SUMMARY_SIG] > 0);
+  pull_data->n_outstanding[FETCH_SUMMARY_SIG]--;
+  pull_data->n_fetched[FETCH_SUMMARY_SIG]++;
+  check_outstanding_requests_handle_error (pull_data, local_error);
+}
+
 /* ------------------------------------------------------------------------------------------
  * Below is the libsoup-invariant API; these should match
  * the stub functions in the #else clause
@@ -2734,59 +2765,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
                                       NULL, &metalink_url_str, error))
     goto out;
 
-  if (!metalink_url_str)
-    {
-      g_autofree char *baseurl = NULL;
-
-      if (url_override != NULL)
-        baseurl = g_strdup (url_override);
-      else if (!ostree_repo_remote_get_url (self, remote_name_or_baseurl, &baseurl, error))
-        goto out;
-
-      pull_data->base_uri = soup_uri_new (baseurl);
-
-      if (!pull_data->base_uri)
-        {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Failed to parse url '%s'", baseurl);
-          goto out;
-        }
-    }
-  else
-    {
-      g_autoptr(GBytes) summary_bytes = NULL;
-      SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
-      glnx_unref_object OstreeMetalink *metalink = NULL;
-      SoupURI *target_uri = NULL;
-      
-      if (!metalink_uri)
-        {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Invalid metalink URL: %s", metalink_url_str);
-          goto out;
-        }
-      
-      metalink = _ostree_metalink_new (pull_data->fetcher, "summary",
-                                       OSTREE_MAX_METADATA_SIZE, metalink_uri);
-      soup_uri_free (metalink_uri);
-
-      if (! _ostree_metalink_request_sync (metalink,
-                                           &target_uri,
-                                           &summary_bytes,
-                                           &pull_data->fetching_sync_uri,
-                                           cancellable,
-                                           error))
-        goto out;
-
-      {
-        g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (target_uri));
-        pull_data->base_uri = soup_uri_copy (target_uri);
-        soup_uri_set_path (pull_data->base_uri, repo_base);
-      }
-
-      pull_data->summary_data = summary_bytes;
-    }
-
   if (strcmp (soup_uri_get_scheme (pull_data->base_uri), "file") == 0)
     {
       g_autoptr(GFile) remote_repo_path = g_file_new_for_path (soup_uri_get_path (pull_data->base_uri));
@@ -2822,25 +2800,69 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
         }
     }
 
-  {
-    SoupURI *uri = NULL;
-    g_autoptr(GBytes) bytes_sig = NULL;
-    g_autofree char *ret_contents = NULL;
+  if (!metalink_url_str)
+    {
+      g_autofree char *baseurl = NULL;
 
-    if (!pull_data->summary_data_sig)
-      {
-        uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
-        if (!fetch_uri_contents_membuf_sync (pull_data, uri, FALSE, TRUE,
-                                             &bytes_sig, cancellable, error))
+      if (url_override != NULL)
+        baseurl = g_strdup (url_override);
+      else if (!ostree_repo_remote_get_url (self, remote_name_or_baseurl, &baseurl, error))
+        goto out;
+
+      pull_data->base_uri = soup_uri_new (baseurl);
+
+      if (!pull_data->base_uri)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Failed to parse url '%s'", baseurl);
           goto out;
-        soup_uri_free (uri);
+        }
+    }
+  else
+    {
+      g_autoptr(GBytes) summary_bytes = NULL;
+      SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
+      glnx_unref_object OstreeMetalink *metalink = NULL;
+      SoupURI *target_uri = NULL;
 
-        if (bytes_sig)
-          pull_data->summary_data_sig = g_bytes_ref (bytes_sig);
+      if (!metalink_uri)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Invalid metalink URL: %s", metalink_url_str);
+          goto out;
+        }
+
+      metalink = _ostree_metalink_new (pull_data->fetcher, "summary",
+                                       OSTREE_MAX_METADATA_SIZE, metalink_uri);
+      soup_uri_free (metalink_uri);
+
+      if (! _ostree_metalink_request_sync (metalink,
+                                           &target_uri,
+                                           &summary_bytes,
+                                           &pull_data->fetching_sync_uri,
+                                           cancellable,
+                                           error))
+        goto out;
+
+      {
+        g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (target_uri));
+        pull_data->base_uri = soup_uri_copy (target_uri);
+        soup_uri_set_path (pull_data->base_uri, repo_base);
       }
 
-    process_summary_sig (pull_data, cancellable, error);
-  }
+      pull_data->summary_data = summary_bytes;
+    }
+
+  SoupURI *uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
+  pull_data->n_outstanding[FETCH_SUMMARY_SIG]++;
+  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                    uri,
+                                    OSTREE_MAX_METADATA_SIZE,
+                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                    cancellable,
+                                    summary_sig_fetch_on_complete,
+                                    pull_data);
+  soup_uri_free (uri);
 
   /* Now await work completion */
   while (!pull_termination_condition (pull_data))
