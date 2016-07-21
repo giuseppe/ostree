@@ -63,7 +63,7 @@ void _ostree_fetcher_set_proxy (OstreeFetcher *fetcher,
                                 const char    *proxy);
 
 void _ostree_fetcher_set_client_cert (OstreeFetcher *fetcher,
-                                     GTlsCertificate *cert);
+                                      GTlsCertificate *cert);
 
 void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
                                        GTlsDatabase *db);
@@ -71,12 +71,12 @@ void _ostree_fetcher_set_tls_database (OstreeFetcher *self,
 guint64 _ostree_fetcher_bytes_transferred (OstreeFetcher       *self);
 
 void _ostree_fetcher_request_uri_with_partial_async (OstreeFetcher         *self,
-                                                    SoupURI               *uri,
-                                                    guint64                max_size,
-                                                    int                    priority,
-                                                    GCancellable          *cancellable,
-                                                    GAsyncReadyCallback    callback,
-                                                    gpointer               user_data);
+                                                     SoupURI               *uri,
+                                                     guint64                max_size,
+                                                     int                    priority,
+                                                     GCancellable          *cancellable,
+                                                     GAsyncReadyCallback    callback,
+                                                     gpointer               user_data);
 
 char *_ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher *self,
                                                        GAsyncResult  *result,
@@ -84,17 +84,17 @@ char *_ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher *self,
 
 void
 _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
-                                 SoupURI               *uri,
-                                 guint64                max_size,
-                                 int                    priority,
-                                 GCancellable          *cancellable,
-                                 GAsyncReadyCallback    callback,
-                                 gpointer               user_data);
+                                  SoupURI               *uri,
+                                  guint64                max_size,
+                                  int                    priority,
+                                  GCancellable          *cancellable,
+                                  GAsyncReadyCallback    callback,
+                                  gpointer               user_data);
 
 GInputStream *
-_ostree_fetcher_stream_uri_finish (OstreeFetcher         *self,
-                                  GAsyncResult          *result,
-                                  GError               **error);
+_ostree_fetcher_stream_uri_finish (gpointer               self,
+                                   GAsyncResult          *result,
+                                   GError               **error);
 
 gboolean _ostree_fetcher_request_uri_to_membuf (OstreeFetcher *fetcher,
                                                 SoupURI        *uri,

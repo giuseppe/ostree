@@ -26,36 +26,28 @@
 
 G_BEGIN_DECLS
 
-#define OSTREE_TYPE_METALINK         (_ostree_metalink_get_type ())
-#define OSTREE_METALINK(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), OSTREE_TYPE_METALINK, OstreeMetalink))
-#define OSTREE_METALINK_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST((k), OSTREE_TYPE_METALINK, OstreeMetalinkClass))
-#define OSTREE_IS_METALINK(o)        (G_TYPE_CHECK_INSTANCE_TYPE ((o), OSTREE_TYPE_METALINK))
-#define OSTREE_IS_METALINK_CLASS(k)  (G_TYPE_CHECK_CLASS_TYPE ((k), OSTREE_TYPE_METALINK))
-#define OSTREE_METALINK_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), OSTREE_TYPE_METALINK, OstreeMetalinkClass))
+void
+_ostree_metalink_request_async (OstreeFetcher         *fetcher,
+                                SoupURI               *uri,
+                                const char            *requested_file,
+                                guint64                max_size,
+                                int                    priority,
+                                GAsyncReadyCallback    callback,
+                                gpointer               user_data,
+                                GCancellable          *cancellable);
 
-typedef struct OstreeMetalinkClass   OstreeMetalinkClass;
-typedef struct OstreeMetalink   OstreeMetalink;
-
-struct OstreeMetalinkClass
+typedef struct
 {
-  GObjectClass parent_class;
-};
+  SoupURI               *target_uri;
+  GBytes                *data;
+} FetchMetalinkResult;
 
-GType   _ostree_metalink_get_type (void) G_GNUC_CONST;
+FetchMetalinkResult*
+_ostree_metalink_request_finish (GObject               *object,
+                                 GAsyncResult          *result,
+                                 GError               **error);
 
-OstreeMetalink *_ostree_metalink_new (OstreeFetcher  *fetcher,
-                                      const char     *requested_file,
-                                      guint64         max_size,
-                                      SoupURI        *uri);
 
-SoupURI *_ostree_metalink_get_uri (OstreeMetalink         *self);
-
-gboolean _ostree_metalink_request_sync (OstreeMetalink        *self,
-                                        SoupURI               **out_target_uri,
-                                        GBytes                **out_data,
-                                        SoupURI               **fetching_sync_uri,
-                                        GCancellable          *cancellable,
-                                        GError                **error);
 G_END_DECLS
 
 #endif

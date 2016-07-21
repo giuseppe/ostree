@@ -47,6 +47,7 @@ typedef enum {
   FETCH_REF,
   FETCH_SUMMARY,
   FETCH_SUMMARY_SIG,
+  FETCH_CONFIG,
   FETCH_METALINK,
   MAX_FETCH_TYPES
 } FetchType;
@@ -68,12 +69,7 @@ typedef struct {
   gboolean      dry_run;
   gboolean      dry_run_emitted_progress;
   gboolean      legacy_transaction_resuming;
-  enum {
-    OSTREE_PULL_PHASE_FETCHING_REFS,
-    OSTREE_PULL_PHASE_FETCHING_OBJECTS
-  }             phase;
   gint          n_scanned_metadata;
-  SoupURI       *fetching_sync_uri;
   
   gboolean          gpg_verify;
   gboolean          gpg_verify_summary;
@@ -284,14 +280,7 @@ update_progress (gpointer user_data)
   ostree_async_progress_set_uint (pull_data->progress, "outstanding-metadata-fetches", pull_data->n_outstanding[FETCH_METADATA]);
   ostree_async_progress_set_uint (pull_data->progress, "metadata-fetched", pull_data->n_fetched[FETCH_METADATA]);
 
-  if (pull_data->fetching_sync_uri)
-    {
-      g_autofree char *uri_string = soup_uri_to_string (pull_data->fetching_sync_uri, TRUE);
-      g_autofree char *status_string = g_strconcat ("Requesting ", uri_string, NULL);
-      ostree_async_progress_set_status (pull_data->progress, status_string);
-    }
-  else
-    ostree_async_progress_set_status (pull_data->progress, NULL);
+  ostree_async_progress_set_status (pull_data->progress, NULL);
 
   if (pull_data->dry_run)
     {
@@ -320,20 +309,12 @@ pull_termination_condition (OtPullData          *pull_data)
   if (pull_data->caught_error)
     return TRUE;
 
-  switch (pull_data->phase)
+  if (current_idle)
     {
-    case OSTREE_PULL_PHASE_FETCHING_REFS:
-      if (!pull_data->fetching_sync_uri)
-        return TRUE;
-      break;
-    case OSTREE_PULL_PHASE_FETCHING_OBJECTS:
-      if (current_idle && !pull_data->fetching_sync_uri)
-        {
-          g_debug ("pull: idle, exiting mainloop");
-          return TRUE;
-        }
-      break;
+      g_debug ("pull: idle, exiting mainloop");
+      return TRUE;
     }
+
   return FALSE;
 }
 
@@ -354,66 +335,6 @@ check_outstanding_requests_handle_error (OtPullData          *pull_data,
         }
       g_cancellable_cancel (pull_data->cancellable);
     }
-}
-
-typedef struct {
-  OtPullData     *pull_data;
-  GInputStream   *result_stream;
-} OstreeFetchUriSyncData;
-
-static gboolean
-fetch_uri_contents_membuf_sync (OtPullData    *pull_data,
-                                SoupURI        *uri,
-                                gboolean        add_nul,
-                                gboolean        allow_noent,
-                                GBytes        **out_contents,
-                                GCancellable   *cancellable,
-                                GError        **error)
-{
-  gboolean ret;
-  pull_data->fetching_sync_uri = uri;
-  ret = _ostree_fetcher_request_uri_to_membuf (pull_data->fetcher,
-                                               uri,
-                                               add_nul,
-                                               allow_noent,
-                                               out_contents,
-                                               OSTREE_MAX_METADATA_SIZE,
-                                               cancellable,
-                                               error);
-  pull_data->fetching_sync_uri = NULL;
-  return ret;
-}
-
-static gboolean
-fetch_uri_contents_utf8_sync (OtPullData  *pull_data,
-                              SoupURI     *uri,
-                              char       **out_contents,
-                              GCancellable  *cancellable,
-                              GError     **error)
-{
-  gboolean ret = FALSE;
-  g_autoptr(GBytes) bytes = NULL;
-  g_autofree char *ret_contents = NULL;
-  gsize len;
-
-  if (!fetch_uri_contents_membuf_sync (pull_data, uri, TRUE, FALSE,
-                                       &bytes, cancellable, error))
-    goto out;
-
-  ret_contents = g_bytes_unref_to_data (bytes, &len);
-  bytes = NULL;
-
-  if (!g_utf8_validate (ret_contents, -1, NULL))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Invalid UTF-8");
-      goto out;
-    }
-
-  ret = TRUE;
-  ot_transfer_out_value (out_contents, &ret_contents);
- out:
-  return ret;
 }
 
 static gboolean
@@ -991,7 +912,7 @@ content_fetch_on_complete (GObject        *object,
   OtPullData *pull_data = fetch_data->pull_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GCancellable *cancellable = NULL;
+  GCancellable *cancellable = pull_data->cancellable;
   guint64 length;
   g_autoptr(GFileInfo) file_info = NULL;
   g_autoptr(GVariant) xattrs = NULL;
@@ -1984,39 +1905,10 @@ out:
   return ret;
 }
 
-static gboolean
-load_remote_repo_config (OtPullData    *pull_data,
-                         GKeyFile     **out_keyfile,
-                         GCancellable  *cancellable,
-                         GError       **error)
-{
-  gboolean ret = FALSE;
-  g_autofree char *contents = NULL;
-  GKeyFile *ret_keyfile = NULL;
-  SoupURI *target_uri = NULL;
-
-  target_uri = suburi_new (pull_data->base_uri, "config", NULL);
-
-  if (!fetch_uri_contents_utf8_sync (pull_data, target_uri, &contents,
-                                     cancellable, error))
-    goto out;
-
-  ret_keyfile = g_key_file_new ();
-  if (!g_key_file_load_from_data (ret_keyfile, contents, strlen (contents),
-                                  0, error))
-    goto out;
-
-  ret = TRUE;
-  ot_transfer_out_value (out_keyfile, &ret_keyfile);
- out:
-  g_clear_pointer (&ret_keyfile, (GDestroyNotify) g_key_file_unref);
-  g_clear_pointer (&target_uri, (GDestroyNotify) soup_uri_free);
-  return ret;
-}
-
 static OstreeFetcher *
 _ostree_repo_remote_new_fetcher (OstreeRepo  *self,
-                                 const char  *remote_name,
+                                 const char  *
+,
                                  GError     **error)
 {
   OstreeFetcher *fetcher = NULL;
@@ -2484,7 +2376,6 @@ process_summary_sig (OtPullData    *pull_data,
                                         pull_data);
       soup_uri_free (uri);
     }
-  pull_data->phase = OSTREE_PULL_PHASE_FETCHING_OBJECTS;
   ret = TRUE;
  out:
   return ret;
@@ -2515,6 +2406,142 @@ summary_sig_fetch_on_complete (GObject        *object,
   g_assert (pull_data->n_outstanding[FETCH_SUMMARY_SIG] > 0);
   pull_data->n_outstanding[FETCH_SUMMARY_SIG]--;
   pull_data->n_fetched[FETCH_SUMMARY_SIG]++;
+  check_outstanding_requests_handle_error (pull_data, local_error);
+}
+
+static gboolean
+fetch_summary_sig (OtPullData    *pull_data,
+                   GCancellable  *cancellable,
+                   GError       **error)
+{
+  SoupURI *uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
+  pull_data->n_outstanding[FETCH_SUMMARY_SIG]++;
+  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                    uri,
+                                    OSTREE_MAX_METADATA_SIZE,
+                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                    cancellable,
+                                    summary_sig_fetch_on_complete,
+                                    pull_data);
+  soup_uri_free (uri);
+}
+
+static void
+config_fetch_on_complete (GObject        *object,
+                          GAsyncResult   *result,
+                          gpointer        user_data)
+{
+  OstreeFetcher *fetcher = (OstreeFetcher *)object;
+  OtPullData *pull_data = user_data;
+  GError *local_error = NULL;
+  GError **error = &local_error;
+  g_autoptr(GBytes) bytes = NULL;
+  g_autofree char *contents = NULL;
+  gsize len;
+  g_autoptr(GKeyFile) remote_config = g_key_file_new ();
+  g_autofree char *remote_mode_str = NULL;
+
+  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
+  g_autoptr(GMemoryOutputStream) buf = NULL;
+
+  if (!_ostree_fetcher_membuf_splice (input, TRUE, FALSE, &buf, pull_data->cancellable, error))
+    goto out;
+
+  bytes = g_memory_output_stream_steal_as_bytes ( buf );
+  contents = g_bytes_unref_to_data (bytes, &len);
+  bytes = NULL;
+
+  if (!g_utf8_validate (contents, len, NULL))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                  "Invalid UTF-8 in config");
+      goto out;
+    }
+
+  if (!g_key_file_load_from_data (remote_config, contents, len, 0, error))
+    goto out;
+
+  if (!ot_keyfile_get_value_with_default (remote_config, "core", "mode", "bare",
+                                          &remote_mode_str, error))
+    goto out;
+
+  if (!ostree_repo_mode_from_string (remote_mode_str, &pull_data->remote_mode, error))
+    goto out;
+
+  if (!ot_keyfile_get_boolean_with_default (remote_config, "core", "tombstone-commits", FALSE,
+                                            &pull_data->has_tombstone_commits, error))
+    goto out;
+
+  if (pull_data->remote_mode != OSTREE_REPO_MODE_ARCHIVE_Z2)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Can't pull from archives with mode \"%s\"",
+                    remote_mode_str);
+      goto out;
+    }
+
+ out:
+  g_assert (pull_data->n_outstanding[FETCH_CONFIG] > 0);
+  pull_data->n_outstanding[FETCH_CONFIG]--;
+  pull_data->n_fetched[FETCH_CONFIG]++;
+  check_outstanding_requests_handle_error (pull_data, local_error);
+}
+
+static gboolean
+fetch_config (OtPullData    *pull_data,
+              GCancellable  *cancellable,
+              GError       **error)
+{
+  if (strcmp (soup_uri_get_scheme (pull_data->base_uri), "file") == 0)
+    {
+      g_autoptr(GFile) remote_repo_path = g_file_new_for_path (soup_uri_get_path (pull_data->base_uri));
+      pull_data->remote_repo_local = ostree_repo_new (remote_repo_path);
+      if (!ostree_repo_open (pull_data->remote_repo_local, cancellable, error))
+        goto out;
+    }
+  else
+    {
+      SoupURI *uri = suburi_new (pull_data->base_uri, "config", NULL);
+      pull_data->n_outstanding[FETCH_CONFIG]++;
+      _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                        uri,
+                                        OSTREE_MAX_METADATA_SIZE,
+                                        OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                        cancellable,
+                                        config_fetch_on_complete,
+                                        pull_data);
+      soup_uri_free (uri);
+    }
+ out:
+  return;
+}
+
+static void
+metalink_fetch_on_complete (GObject        *object,
+                            GAsyncResult   *result,
+                            gpointer        user_data)
+{
+  OtPullData *pull_data = user_data;
+  GError *local_error = NULL;
+  GError **error = &local_error;
+
+  FetchMetalinkResult* data = _ostree_metalink_request_finish (object, result, error);
+  if(error != NULL)
+      goto out;
+
+  {
+    g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (out->target_uri));
+    pull_data->base_uri = soup_uri_copy (out->target_uri);
+    soup_uri_set_path (pull_data->base_uri, repo_base);
+  }
+
+  pull_data->summary_data = out->bytes;
+  fetch_config (pull_data, cancellable, error);
+
+ out:
+  g_assert (pull_data->n_outstanding[FETCH_METALINK] > 0);
+  pull_data->n_outstanding[FETCH_METALINK]--;
+  pull_data->n_fetched[FETCH_METALINK]++;
   check_outstanding_requests_handle_error (pull_data, local_error);
 }
 
@@ -2621,6 +2648,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
   pull_data->repo = self;
   pull_data->progress = progress;
+  pull_data->cancellable = cancellable;
 
   pull_data->expected_commit_sizes = g_hash_table_new_full (g_str_hash, g_str_equal,
                                                             (GDestroyNotify)g_free,
@@ -2637,6 +2665,8 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
                                                         (GDestroyNotify)g_free, NULL);
   pull_data->requested_metadata = g_hash_table_new_full (g_str_hash, g_str_equal,
                                                          (GDestroyNotify)g_free, NULL);
+  pull_data->requested_refs_to_fetch = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  pull_data->commits_to_fetch = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_queue_init (&pull_data->scan_object_queue);
 
   pull_data->start_time = g_get_monotonic_time ();
@@ -2682,9 +2712,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
   pull_data->tmpdir_dfd = pull_data->repo->tmp_dir_fd;
   pull_data->static_delta_superblocks = g_ptr_array_new_with_free_func ((GDestroyNotify)g_variant_unref);
-
-  pull_data->requested_refs_to_fetch = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-  pull_data->commits_to_fetch = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
   {
     if (refs_to_fetch != NULL)
@@ -2754,51 +2781,20 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
       g_source_unref (update_timeout);
     }
 
-  pull_data->phase = OSTREE_PULL_PHASE_FETCHING_REFS;
-
   pull_data->fetcher = _ostree_repo_remote_new_fetcher (self, remote_name_or_baseurl, error);
   if (pull_data->fetcher == NULL)
     goto out;
+
+  /* At this point, all fields of pull_data are initialized besides:
+   * - base_uri (filled in from metalink or ostree_repo_remote_get_url)
+   * - summary* (filled in by fetching the summary or from cache)
+   * - remote_repo_local, remote_mode, has_tombstone_commits (filled in from config)
+   */
 
   if (!ostree_repo_get_remote_option (self,
                                       remote_name_or_baseurl, "metalink",
                                       NULL, &metalink_url_str, error))
     goto out;
-
-  if (strcmp (soup_uri_get_scheme (pull_data->base_uri), "file") == 0)
-    {
-      g_autoptr(GFile) remote_repo_path = g_file_new_for_path (soup_uri_get_path (pull_data->base_uri));
-      pull_data->remote_repo_local = ostree_repo_new (remote_repo_path);
-      if (!ostree_repo_open (pull_data->remote_repo_local, cancellable, error))
-        goto out;
-    }
-  else
-    {
-      g_autofree char *remote_mode_str = NULL;
-      g_autoptr(GKeyFile) remote_config = NULL;
-
-      if (!load_remote_repo_config (pull_data, &remote_config, cancellable, error))
-        goto out;
-
-      if (!ot_keyfile_get_value_with_default (remote_config, "core", "mode", "bare",
-                                              &remote_mode_str, error))
-        goto out;
-
-      if (!ostree_repo_mode_from_string (remote_mode_str, &pull_data->remote_mode, error))
-        goto out;
-
-      if (!ot_keyfile_get_boolean_with_default (remote_config, "core", "tombstone-commits", FALSE,
-                                                &pull_data->has_tombstone_commits, error))
-        goto out;
-
-      if (pull_data->remote_mode != OSTREE_REPO_MODE_ARCHIVE_Z2)
-        {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Can't pull from archives with mode \"%s\"",
-                       remote_mode_str);
-          goto out;
-        }
-    }
 
   if (!metalink_url_str)
     {
@@ -2817,52 +2813,29 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
                        "Failed to parse url '%s'", baseurl);
           goto out;
         }
+
+      fetch_config (pull_data, cancellable, error);
     }
   else
     {
-      g_autoptr(GBytes) summary_bytes = NULL;
       SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
-      glnx_unref_object OstreeMetalink *metalink = NULL;
-      SoupURI *target_uri = NULL;
-
       if (!metalink_uri)
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Invalid metalink URL: %s", metalink_url_str);
           goto out;
         }
-
-      metalink = _ostree_metalink_new (pull_data->fetcher, "summary",
-                                       OSTREE_MAX_METADATA_SIZE, metalink_uri);
+      pull_data->n_outstanding[FETCH_METALINK]++;
+      _ostree_metalink_request_async (pull_data->fetcher,
+                                      metalink_uri,
+                                      "summary",
+                                      OSTREE_MAX_METADATA_SIZE,
+                                      OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                      metalink_fetch_on_complete,
+                                      pull_data,
+                                      cancellable);
       soup_uri_free (metalink_uri);
-
-      if (! _ostree_metalink_request_sync (metalink,
-                                           &target_uri,
-                                           &summary_bytes,
-                                           &pull_data->fetching_sync_uri,
-                                           cancellable,
-                                           error))
-        goto out;
-
-      {
-        g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (target_uri));
-        pull_data->base_uri = soup_uri_copy (target_uri);
-        soup_uri_set_path (pull_data->base_uri, repo_base);
-      }
-
-      pull_data->summary_data = summary_bytes;
     }
-
-  SoupURI *uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
-  pull_data->n_outstanding[FETCH_SUMMARY_SIG]++;
-  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
-                                    uri,
-                                    OSTREE_MAX_METADATA_SIZE,
-                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
-                                    summary_sig_fetch_on_complete,
-                                    pull_data);
-  soup_uri_free (uri);
 
   /* Now await work completion */
   while (!pull_termination_condition (pull_data))

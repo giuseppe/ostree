@@ -1076,12 +1076,12 @@ _ostree_fetcher_request_uri_with_partial_finish (OstreeFetcher         *self,
 
 void
 _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
-                                 SoupURI               *uri,
-                                 guint64                max_size,
-                                 int                    priority,
-                                 GCancellable          *cancellable,
-                                 GAsyncReadyCallback    callback,
-                                 gpointer               user_data)
+                                  SoupURI               *uri,
+                                  guint64                max_size,
+                                  int                    priority,
+                                  GCancellable          *cancellable,
+                                  GAsyncReadyCallback    callback,
+                                  gpointer               user_data)
 {
   ostree_fetcher_request_uri_internal (self, uri, TRUE, max_size, priority, cancellable,
                                        callback, user_data,
@@ -1089,9 +1089,9 @@ _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
 }
 
 GInputStream *
-_ostree_fetcher_stream_uri_finish (OstreeFetcher         *self,
-                                  GAsyncResult          *result,
-                                  GError               **error)
+_ostree_fetcher_stream_uri_finish (gpointer               self,
+                                   GAsyncResult          *result,
+                                   GError               **error)
 {
   g_return_val_if_fail (g_task_is_valid (result, self), NULL);
   g_return_val_if_fail (g_async_result_is_tagged (result,
