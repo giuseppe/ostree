@@ -1580,15 +1580,10 @@ delta_superblock_fetch_on_complete (GObject        *object,
   OtPullData *pull_data = fetch_data->pull_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
   GBytes* delta_superblock_data = NULL;
 
-  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+  if (!_ostree_fetcher_stream_uri_finish (fetcher, result, FALSE, TRUE, &delta_superblock_data, pull_data->cancellable, error))
     goto out;
-
-  if (buf)
-    delta_superblock_data = g_memory_output_stream_steal_as_bytes ( buf );
 
   delta_superblock_process (fetch_data, delta_superblock_data, pull_data->cancellable, error);
 
@@ -1655,14 +1650,15 @@ revision_fetch_on_complete (GObject        *object,
   OtPullData *pull_data = fetch_data->pull_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
   gboolean free_fetch_data = TRUE;
-  g_autoptr(GMemoryOutputStream) buf = NULL;
+  GBytes* buf = NULL;
+  gsize len;
 
-  if (!_ostree_fetcher_membuf_splice (input, TRUE, FALSE, &buf, pull_data->cancellable, error) || !buf)
+  if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &buf, pull_data->cancellable, error))
     goto out;
 
-  fetch_data->to_revision = g_memory_output_stream_steal_data ( buf );
+  fetch_data->to_revision = g_bytes_unref_to_data (buf, &len);
+
   fetch_revision (fetch_data, pull_data->cancellable, error);
   free_fetch_data = FALSE;
 
@@ -2130,14 +2126,8 @@ summary_fetch_on_complete (GObject        *object,
   GError *local_error = NULL;
   GError **error = &local_error;
 
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
-
-  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+  if (!_ostree_fetcher_stream_uri_finish (fetcher, result, FALSE, TRUE, &pull_data->summary_data, pull_data->cancellable, error))
     goto out;
-
-  if (buf)
-    pull_data->summary_data = g_memory_output_stream_steal_as_bytes ( buf );
 
   if (pull_data->summary_data && pull_data->summary_data_sig)
     {
@@ -2222,14 +2212,8 @@ summary_sig_fetch_on_complete (GObject        *object,
   GError *local_error = NULL;
   GError **error = &local_error;
 
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
-
-  if (!_ostree_fetcher_membuf_splice (input, FALSE, TRUE, &buf, pull_data->cancellable, error))
+  if (!_ostree_fetcher_stream_uri_finish (fetcher, result, FALSE, TRUE, &pull_data->summary_data_sig, pull_data->cancellable, error))
     goto out;
-
-  if (buf)
-    pull_data->summary_data_sig = g_memory_output_stream_steal_as_bytes ( buf );
 
   process_summary_sig (pull_data, pull_data->cancellable, error);
 
@@ -2267,21 +2251,16 @@ config_fetch_on_complete (GObject        *object,
   OtPullData *pull_data = user_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  g_autoptr(GBytes) bytes = NULL;
+  GBytes* bytes = NULL;
   g_autofree char *contents = NULL;
   gsize len;
   g_autoptr(GKeyFile) remote_config = g_key_file_new ();
   g_autofree char *remote_mode_str = NULL;
 
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
-
-  if (!_ostree_fetcher_membuf_splice (input, TRUE, FALSE, &buf, pull_data->cancellable, error))
+  if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &bytes, pull_data->cancellable, error))
     goto out;
 
-  bytes = g_memory_output_stream_steal_as_bytes ( buf );
   contents = g_bytes_unref_to_data (bytes, &len);
-  bytes = NULL;
 
   if (!g_key_file_load_from_data (remote_config, contents, len, 0, error))
     goto out;

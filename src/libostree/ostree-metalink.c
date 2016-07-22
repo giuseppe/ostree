@@ -426,23 +426,18 @@ valid_hex_checksum (const char *s, gsize expected_len)
 }
 
 static void
-try_one_url (GObject        *fetcher,
+try_one_url (GObject        *object,
              GAsyncResult   *result,
              gpointer        user_data)
 {
   OstreeMetalink *self = (OstreeMetalink *)user_data;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
   g_autoptr(GBytes) bytes = NULL;
   gssize n_bytes;
 
-  if (!_ostree_fetcher_membuf_splice (input, FALSE, FALSE, &buf, g_task_get_cancellable (self->task), error))
+  if (!_ostree_fetcher_stream_uri_finish (object, result, FALSE, FALSE, &bytes, g_task_get_cancellable (self->task), error))
     goto out;
-
-  if (buf)
-    bytes = g_memory_output_stream_steal_as_bytes ( buf );
 
   n_bytes = g_bytes_get_size (bytes);
   if (n_bytes != self->size)
@@ -521,20 +516,16 @@ metalink_fetch_on_complete (GObject           *object,
 {
   GError* local_error = NULL;
   GError **error = &local_error;
-  OstreeFetcher *fetcher = (OstreeFetcher *)object;
   OstreeMetalink *self = user_data;
-  GInputStream* input = _ostree_fetcher_stream_uri_finish (fetcher, result, error);
-  g_autoptr(GMemoryOutputStream) buf = NULL;
-  GBytes *out_contents = NULL;
+  g_autoptr(GBytes) out_contents = NULL;
   gsize len;
   const guint8 *data;
   GMarkupParseContext *parser;
   OstreeMetalinkParse parse = { .metalink = self };
 
-  if (!_ostree_fetcher_membuf_splice (input, FALSE, FALSE, &buf, g_task_get_cancellable(self->task), error))
+  if (!_ostree_fetcher_stream_uri_finish (object, result, FALSE, FALSE, &out_contents, g_task_get_cancellable(self->task), error))
     goto out;
 
-  out_contents = g_memory_output_stream_steal_as_bytes ( buf );
   data = g_bytes_get_data (out_contents, &len);
 
   parser = g_markup_parse_context_new (&metalink_parser, G_MARKUP_PREFIX_ERROR_POSITION, &parse, NULL);

@@ -1088,18 +1088,6 @@ _ostree_fetcher_stream_uri_async (OstreeFetcher         *self,
                                        _ostree_fetcher_stream_uri_async);
 }
 
-GInputStream *
-_ostree_fetcher_stream_uri_finish (gpointer               self,
-                                   GAsyncResult          *result,
-                                   GError               **error)
-{
-  g_return_val_if_fail (g_task_is_valid (result, self), NULL);
-  g_return_val_if_fail (g_async_result_is_tagged (result,
-                        _ostree_fetcher_stream_uri_async), NULL);
-
-  return g_task_propagate_pointer (G_TASK (result), error);
-}
-
 guint64
 _ostree_fetcher_bytes_transferred (OstreeFetcher       *self)
 {
@@ -1131,94 +1119,36 @@ _ostree_fetcher_bytes_transferred (OstreeFetcher       *self)
   return ret;
 }
 
-typedef struct
-{
-  GInputStream   *result_stream;
-  gboolean         done;
-  GError         **error;
-}
-FetchUriSyncData;
-
-static void
-fetch_uri_sync_on_complete (GObject        *object,
-                            GAsyncResult   *result,
-                            gpointer        user_data)
-{
-  FetchUriSyncData *data = user_data;
-
-  data->result_stream = _ostree_fetcher_stream_uri_finish ((OstreeFetcher*)object,
-                                                          result, data->error);
-  data->done = TRUE;
-}
-
-gboolean
-_ostree_fetcher_request_uri_to_membuf (OstreeFetcher  *fetcher,
-                                       SoupURI        *uri,
-                                       gboolean        add_nul,
-                                       gboolean        allow_noent,
-                                       GBytes         **out_contents,
-                                       guint64        max_size,
-                                       GCancellable   *cancellable,
-                                       GError         **error)
-{
-  gboolean ret = FALSE;
-  g_autofree char *ret_contents = NULL;
-  g_autoptr(GMemoryOutputStream) buf = NULL;
-  g_autoptr(GMainContext) mainctx = NULL;
-  FetchUriSyncData data;
-  g_assert (error != NULL);
-
-  data.result_stream = NULL;
-
-  if (g_cancellable_set_error_if_cancelled (cancellable, error))
-    return FALSE;
-
-  mainctx = g_main_context_new ();
-  g_main_context_push_thread_default (mainctx);
-
-  data.done = FALSE;
-  data.error = error;
-
-  _ostree_fetcher_stream_uri_async (fetcher, uri,
-                                   max_size,
-                                   OSTREE_FETCHER_DEFAULT_PRIORITY,
-                                   cancellable,
-                                   fetch_uri_sync_on_complete, &data);
-  while (!data.done)
-    g_main_context_iteration (mainctx, TRUE);
-
-  if(!_ostree_fetcher_membuf_splice (data.result_stream, add_nul, allow_noent, &buf, cancellable, error))
-    goto out;
-
-  ret = TRUE;
-  if (buf)
-    *out_contents = g_memory_output_stream_steal_as_bytes (buf);
- out:
-  if (mainctx)
-    g_main_context_pop_thread_default (mainctx);
-  g_clear_object (&(data.result_stream));
-  return ret;
-}
-
 /**
- * _ostree_fetcher_membuf_splice:
- * @result_stream: Input stream
- * @buf: (out): pointer to either NULL or a closed GMemoryOutputStream
- * Converts a GInputStream to an in-memory buffer,
+ * _ostree_fetcher_stream_uri_finish:
+ * @out: (out): pointer to either NULL or the GBytes
+ * @allow_noent: TRUE: allow missing files, use null buffer
+ * @add_nul: TRUE: add final null byte
+ * Splices fetcher's result to an in-memory buffer,
  * which must be freed later if non-null.
  */
 gboolean
-_ostree_fetcher_membuf_splice (GInputStream         *result_stream,
-                               gboolean              add_nul,
-                               gboolean              allow_noent,
-                               GMemoryOutputStream **buf,
-                               GCancellable         *cancellable,
-                               GError              **error)
+_ostree_fetcher_stream_uri_finish (gpointer              self,
+                                   GAsyncResult         *result,
+                                   gboolean              add_nul,
+                                   gboolean              allow_noent,
+                                   GBytes              **out,
+                                   GCancellable         *cancellable,
+                                   GError              **error)
 {
   gboolean ret = FALSE;
   static const guint8 nulchar = 0;
-  *buf = NULL;
+  glnx_unref_object GInputStream* result_stream = NULL;
+  glnx_unref_object GMemoryOutputStream *buf = NULL;
+
+  *out = NULL;
+
   g_assert (error != NULL);
+  g_return_val_if_fail (g_task_is_valid (result, self), FALSE);
+  g_return_val_if_fail (g_async_result_is_tagged (result,
+                        _ostree_fetcher_stream_uri_async), FALSE);
+
+  result_stream = g_task_propagate_pointer (G_TASK (result), error);
 
   if (!result_stream)
     {
@@ -1228,322 +1158,30 @@ _ostree_fetcher_membuf_splice (GInputStream         *result_stream,
             {
               g_clear_error (error);
               ret = TRUE;
-              *buf = NULL;
             }
         }
       goto out;
     }
 
-  *buf = (GMemoryOutputStream*)g_memory_output_stream_new_resizable ();
-  if (g_output_stream_splice ((GOutputStream*)*buf, result_stream,
+  buf = (GMemoryOutputStream*)g_memory_output_stream_new_resizable ();
+  if (g_output_stream_splice ((GOutputStream*)buf, result_stream,
                               G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE,
                               cancellable, error) < 0)
     goto out;
 
   if (add_nul)
     {
-      if (!g_output_stream_write ((GOutputStream*)*buf, &nulchar, 1, cancellable, error))
+      if (!g_output_stream_write ((GOutputStream*)buf, &nulchar, 1, cancellable, error))
         goto out;
     }
 
-  if (!g_output_stream_close ((GOutputStream*)*buf, cancellable, error))
+  if (!g_output_stream_close ((GOutputStream*)buf, cancellable, error))
     goto out;
+
+  *out = g_memory_output_stream_steal_as_bytes ( buf );
 
   ret = TRUE;
 
  out:
-  if (!ret && *buf)
-    {
-      g_free (*buf);
-      *buf = NULL;
-    }
   return ret;
 }
-
-// int create_server() {
-//  struct sockaddr_un addr;
-//  int fd;
-//
-//  if ((fd = socket(AF_LOCAL, SOCK_STREAM, 0)) < 0) {
-//   log_error("Failed to create server socket");
-//   return fd;
-//  }
-//
-//  memset(&addr, 0, sizeof(addr));
-//
-//  addr.sun_family = AF_LOCAL;
-//  unlink(SOCKET_PATH);
-//  strcpy(addr.sun_path, SOCKET_PATH);
-//
-//  if (bind(fd, (struct sockaddr *) &(addr),
-//                               sizeof(addr)) < 0) {
-//   log_error("Failed to bind server socket");
-//   return -1;
-//  }
-//
-//  if (listen(fd, MAX_PENDING) < 0) {
-//   log_error("Failed to listen on server socket");
-//   return -1;
-//  }
-//
-//  setnonblocking(fd);
-//
-//  /* Add handler to handle events on fd */
-//  return fd;
-// }
-//
-// hash_set(ioloop->handlers, fd, handler);
-//
-// e.data.fd = fd;
-// e.events = EPOLLIN;
-//
-// if(epoll_ctl(ioloop->epfd, EPOLL_CTL_ADD, fd, &e) < 0) {
-//  log_error("Failed to insert handler to epoll");
-//  return -1;
-// }
-//
-//
-// int connect_server() {
-//  struct sockaddr_un addr;
-//  int fd;
-//
-//  if ((fd = socket(AF_LOCAL, SOCK_STREAM, 0)) < 0) {
-//   log_error("Failed to create client socket");
-//   return fd;
-//  }
-//
-//  memset(&addr, 0, sizeof(addr));
-//
-//  addr.sun_family = AF_LOCAL;
-//  strcpy(addr.sun_path, SOCKET_PATH);
-//
-//  if (connect(fd,
-//              (struct sockaddr *) &(addr),
-//              sizeof(addr)) < 0) {
-//   log_error("Failed to connect to server");
-//   return -1;
-//  }
-//
-//  setnonblocking(fd);
-//
-//  /* Add handler to handle events */
-//  return fd;
-// }
-//
-// static int
-// recv_file_descriptor(int socket)
-// {
-//  int sent_fd;
-//  struct msghdr message;
-//  struct iovec iov[1];
-//  struct cmsghdr *control_message = NULL;
-//  char ctrl_buf[CMSG_SPACE(sizeof(int))];
-//  char data[1];
-//  int res;
-//
-//  memset(&message, 0, sizeof(struct msghdr));
-//  memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
-//
-//  /* For the dummy data */
-//  iov[0].iov_base = data;
-//  iov[0].iov_len = sizeof(data);
-//
-//  message.msg_name = NULL;
-//  message.msg_namelen = 0;
-//  message.msg_control = ctrl_buf;
-//  message.msg_controllen = CMSG_SPACE(sizeof(int));
-//  message.msg_iov = iov;
-//  message.msg_iovlen = 1;
-//
-//  if((res = recvmsg(socket, &message, 0)) <= 0)
-//   return res;
-//
-//  /* Iterate through header to find if there is a file descriptor */
-//  for(control_message = CMSG_FIRSTHDR(&message);
-//      control_message != NULL;
-//      control_message = CMSG_NXTHDR(&message,
-//                                    control_message))
-//  {
-//   if( (control_message->cmsg_level == SOL_SOCKET) &&
-//       (control_message->cmsg_type == SCM_RIGHTS) )
-//   {
-//    return *((int *) CMSG_DATA(control_message));
-//   }
-//  }
-//
-//  return -1;
-// }
-//
-//
-// static int send_file_descriptor(int socket, int fd_to_send)
-// {
-//  struct msghdr message;
-//  struct iovec iov[1];
-//  struct cmsghdr *control_message = NULL;
-//  char ctrl_buf[CMSG_SPACE(sizeof(int))];
-//  char data[1];
-//
-//  memset(&message, 0, sizeof(struct msghdr));
-//  memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
-//
-//  /* We are passing at least one byte of data so that recvmsg() will not return 0 */
-//  data[0] = ' ';
-//  iov[0].iov_base = data;
-//  iov[0].iov_len = sizeof(data);
-//
-//  message.msg_name = NULL;
-//  message.msg_namelen = 0;
-//  message.msg_iov = iov;
-//  message.msg_iovlen = 1;
-//  message.msg_controllen =  CMSG_SPACE(sizeof(int));
-//  message.msg_control = ctrl_buf;
-//
-//  control_message = CMSG_FIRSTHDR(&message);
-//  control_message->cmsg_level = SOL_SOCKET;
-//  control_message->cmsg_type = SCM_RIGHTS;
-//  control_message->cmsg_len = CMSG_LEN(sizeof(int));
-//
-//  *((int *) CMSG_DATA(control_message)) = fd_to_send;
-//
-//  return sendmsg(socket, &message, 0);
-// }
-//
-//
-// int main(void)
-// {
-//   int sock[2];
-//
-//   /* Open a local (UNIX) anonymous socket pair that preserves order and message boundaries */
-//   if(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sock))
-//     goto out;
-//
-//   printf("Established socket pair: (%d, %d)\n", sock[0], sock[1]);
-//
-//   switch(fork()) {
-//       case 0:
-//           close(sock[0]);
-//           child_process(sock[1]);
-//           break;
-//       case -1:
-//           perror("fork");
-//           exit(1);
-//       default:
-//           close(sock[1]);
-//           parent_process(sock[0]);
-//           wait(NULL);
-//           break;
-//   }
-//
-//  out:
-//   perror("socketpair");
-//   exit(1);
-//   return(0);
-// }
-//
-//
-//
-// void child_process(int sock)
-// {
-//     int fd;
-//     int fds[3], nfds;
-//     char b[] = "This is on the received fd!\n";
-//
-//     if(ancil_recv_fd(sock, &fd)) {
-// 	perror("ancil_recv_fd");
-// 	exit(1);
-//     } else {
-// 	printf("Received fd: %d\n", fd);
-//     }
-//     write(fd, b, sizeof(b));
-//     close(fd);
-//     sleep(2);
-//
-//     nfds = ancil_recv_fds(sock, fds, 3);
-//     if(nfds < 0) {
-// 	perror("ancil_recv_fds");
-// 	exit(1);
-//     } else {
-// 	printf("Received %d/3 fds : %d %d %d.\n", nfds,
-// 	    fds[0], fds[1], fds[2]);
-//     }
-// }
-//
-// void parent_process(int sock)
-// {
-//     int fds[2] = { 1, 2 };
-//
-//     if(ancil_send_fd(sock, 1)) {
-// 	perror("ancil_send_fd");
-// 	exit(1);
-//     } else {
-// 	printf("Sent fd.\n");
-//     }
-//     sleep(1);
-//
-//     if(ancil_send_fds(sock, fds, 2)) {
-// 	perror("ancil_send_fds");
-// 	exit(1);
-//     } else {
-// 	printf("Sent two fds.\n");
-//     }
-// }
-//
-// int
-// ancil_send_fds_with_buffer(int sock, const int *fds, unsigned n_fds, void *buffer)
-// {
-//     struct msghdr msghdr;
-//     char nothing = '!';
-//     struct iovec nothing_ptr;
-//     struct cmsghdr *cmsg;
-//     int i;
-//
-//     nothing_ptr.iov_base = &nothing;
-//     nothing_ptr.iov_len = 1;
-//     msghdr.msg_name = NULL;
-//     msghdr.msg_namelen = 0;
-//     msghdr.msg_iov = &nothing_ptr;
-//     msghdr.msg_iovlen = 1;
-//     msghdr.msg_flags = 0;
-//     msghdr.msg_control = buffer;
-//     msghdr.msg_controllen = sizeof(struct cmsghdr) + sizeof(int) * n_fds;
-//     cmsg = CMSG_FIRSTHDR(&msghdr);
-//     cmsg->cmsg_len = msghdr.msg_controllen;
-//     cmsg->cmsg_level = SOL_SOCKET;
-//     cmsg->cmsg_type = SCM_RIGHTS;
-//     for(i = 0; i < n_fds; i++)
-// 	((int *)CMSG_DATA(cmsg))[i] = fds[i];
-//     return(sendmsg(sock, &msghdr, 0) >= 0 ? 0 : -1);
-// }
-//
-// int
-// ancil_recv_fds_with_buffer(int sock, int *fds, unsigned n_fds, void *buffer)
-// {
-//     struct msghdr msghdr;
-//     char nothing;
-//     struct iovec nothing_ptr;
-//     struct cmsghdr *cmsg;
-//     int i;
-//
-//     nothing_ptr.iov_base = &nothing;
-//     nothing_ptr.iov_len = 1;
-//     msghdr.msg_name = NULL;
-//     msghdr.msg_namelen = 0;
-//     msghdr.msg_iov = &nothing_ptr;
-//     msghdr.msg_iovlen = 1;
-//     msghdr.msg_flags = 0;
-//     msghdr.msg_control = buffer;
-//     msghdr.msg_controllen = sizeof(struct cmsghdr) + sizeof(int) * n_fds;
-//     cmsg = CMSG_FIRSTHDR(&msghdr);
-//     cmsg->cmsg_len = msghdr.msg_controllen;
-//     cmsg->cmsg_level = SOL_SOCKET;
-//     cmsg->cmsg_type = SCM_RIGHTS;
-//     for(i = 0; i < n_fds; i++)
-// 	((int *)CMSG_DATA(cmsg))[i] = -1;
-//
-//     if(recvmsg(sock, &msghdr, 0) < 0)
-// 	return(-1);
-//     for(i = 0; i < n_fds; i++)
-// 	fds[i] = ((int *)CMSG_DATA(cmsg))[i];
-//     n_fds = (cmsg->cmsg_len - sizeof(struct cmsghdr)) / sizeof(int);
-//     return(n_fds);
-// }
