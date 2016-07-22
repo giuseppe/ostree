@@ -1,0 +1,34 @@
+digraph x {
+  content_fetch_on_complete -> content_fetch_on_write_complete [style=dotted];
+  delta_superblock_fetch_on_complete -> delta_superblock_process;
+  delta_superblock_process -> process_one_static_delta;
+  delta_superblock_process -> queue_scan_one_metadata_object;
+  enqueue_one_object_request -> content_fetch_on_complete  [style=dotted];
+  enqueue_one_object_request -> meta_fetch_on_complete [style=dotted];
+  ensure_idle_queued -> idle_worker [style=dotted];
+  fetch_revision -> delta_superblock_fetch_on_complete  [style=dotted];
+  fetch_revision -> delta_superblock_process;
+  idle_worker -> scan_one_metadata_object_c;
+  meta_fetch_on_complete -> enqueue_one_object_request;
+  meta_fetch_on_complete -> on_metadata_written [style=dotted];
+  on_metadata_written -> queue_scan_one_metadata_object_c;
+  process_one_static_delta -> on_metadata_written [style=dotted];
+  process_one_static_delta -> on_static_delta_written [style=dotted];
+  process_one_static_delta -> process_one_static_delta_fallback;
+  process_one_static_delta -> static_deltapart_fetch_on_complete [style=dotted];
+  process_one_static_delta_fallback -> enqueue_one_object_request;
+  queue_scan_one_metadata_object -> queue_scan_one_metadata_object_c;
+  queue_scan_one_metadata_object_c -> ensure_idle_queued;
+  scan_commit_object -> queue_scan_one_metadata_object_c;
+  scan_dirtree_object -> enqueue_one_object_request;
+  scan_dirtree_object -> queue_scan_one_metadata_object_c;
+  scan_one_metadata_object_c -> enqueue_one_object_request;
+  scan_one_metadata_object_c -> scan_commit_object;
+  scan_one_metadata_object_c -> scan_dirtree_object;
+  static_deltapart_fetch_on_complete -> on_static_delta_written [style=dotted];
+  ostree_repo_pull_with_options -> fetch_revision;
+  ostree_repo_pull_with_options -> revision_fetch_on_complete [style=dotted];
+  ostree_repo_pull_with_options -> queue_scan_one_metadata_object;
+  revision_fetch_on_complete -> fetch_revision;
+  // on_static_delta_written
+}
