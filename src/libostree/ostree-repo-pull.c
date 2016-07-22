@@ -2283,13 +2283,6 @@ config_fetch_on_complete (GObject        *object,
   contents = g_bytes_unref_to_data (bytes, &len);
   bytes = NULL;
 
-  if (!g_utf8_validate (contents, len, NULL))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                  "Invalid UTF-8 in config");
-      goto out;
-    }
-
   if (!g_key_file_load_from_data (remote_config, contents, len, 0, error))
     goto out;
 
