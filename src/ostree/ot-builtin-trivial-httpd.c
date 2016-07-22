@@ -38,6 +38,7 @@ static char *opt_log = NULL;
 static gboolean opt_daemonize;
 static gboolean opt_autoexit;
 static gboolean opt_force_ranges;
+static gboolean opt_pause;
 static int opt_random_500s_percentage;
 /* We have a strong upper bound for any unlikely
  * cases involving repeated random 500s. */
@@ -58,6 +59,7 @@ static GOptionEntry options[] = {
   { "port", 'P', 0, G_OPTION_ARG_INT, &opt_port, "Use the specified TCP port", NULL },
   { "port-file", 'p', 0, G_OPTION_ARG_FILENAME, &opt_port_file, "Write port number to PATH (- for standard output)", "PATH" },
   { "force-range-requests", 0, 0, G_OPTION_ARG_NONE, &opt_force_ranges, "Force range requests by only serving half of files", NULL },
+  { "pause", 0, 0, G_OPTION_ARG_NONE, &opt_pause, "Delay requests by 1s and print # of concurrent requests", NULL },
   { "random-500s", 0, 0, G_OPTION_ARG_INT, &opt_random_500s_percentage, "Generate random HTTP 500 errors approximately for PERCENTAGE requests", "PERCENTAGE" },
   { "random-500s-max", 0, 0, G_OPTION_ARG_INT, &opt_random_500s_max, "Limit HTTP 500 errors to MAX (default 100)", "MAX" },
   { "log-file", 0, 0, G_OPTION_ARG_FILENAME, &opt_log, "Put logs here", "PATH" },
@@ -174,6 +176,22 @@ close_socket (SoupMessage *msg, gpointer user_data)
 #else
   shutdown (sockfd, SHUT_WR);
 #endif
+}
+
+typedef struct {
+  SoupServer        *server;
+  SoupMessage       *msg;
+} UnpauseStruct;
+
+static int concurrent_requests = 0;
+
+static gboolean unpause_cb(void* v)
+{
+  UnpauseStruct* s = (UnpauseStruct*) v;
+  soup_server_unpause_message(s->server, s->msg);
+  g_free(s);
+  concurrent_requests--;
+  return FALSE;
 }
 
 static void
@@ -339,6 +357,19 @@ do_get (OtTrivialHttpd    *self,
         }
       soup_message_set_status (msg, SOUP_STATUS_OK);
     }
+
+  if (opt_pause)
+    {
+      UnpauseStruct* s;
+      concurrent_requests++;
+      httpd_log (self, "%" G_GINT64_FORMAT ": concurrent requests %i", g_get_monotonic_time(), concurrent_requests);
+      s = g_new0( UnpauseStruct, 1);
+      s->server = server;
+      s->msg = msg;
+      g_timeout_add_seconds (1, unpause_cb, s);
+      soup_server_pause_message(server, msg);
+    }
+
  out:
   {
     guint status = 0;
