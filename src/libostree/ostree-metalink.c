@@ -39,8 +39,16 @@ typedef enum {
   OSTREE_METALINK_STATE_PASSTHROUGH /* Ignoring unknown elements */
 } OstreeMetalinkState;
 
-typedef struct
+#define OSTREE_TYPE_METALINK         (_ostree_metalink_get_type ())
+#define OSTREE_METALINK(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), OSTREE_TYPE_METALINK, OstreeMetalink))
+#define OSTREE_METALINK_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST((k), OSTREE_TYPE_METALINK, OstreeMetalinkClass))
+#define OSTREE_IS_METALINK(o)        (G_TYPE_CHECK_INSTANCE_TYPE ((o), OSTREE_TYPE_METALINK))
+#define OSTREE_IS_METALINK_CLASS(k)  (G_TYPE_CHECK_CLASS_TYPE ((k), OSTREE_TYPE_METALINK))
+#define OSTREE_METALINK_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), OSTREE_TYPE_METALINK, OstreeMetalinkClass))
+
+struct OstreeMetalink
 {
+  GObject parent_instance;
   GTask *task;
 
   OstreeFetcher *fetcher;
@@ -54,18 +62,48 @@ typedef struct
 
   guint current_url_index;
   GPtrArray *urls;
-} OstreeMetalink;
+};
+
+struct OstreeMetalinkClass
+{
+  GObjectClass parent_class;
+};
+
+typedef struct OstreeMetalinkClass   OstreeMetalinkClass;
+typedef struct OstreeMetalink   OstreeMetalink;
+
+GType   _ostree_metalink_get_type (void) G_GNUC_CONST;
+
+G_DEFINE_TYPE (OstreeMetalink, _ostree_metalink, G_TYPE_OBJECT)
 
 static void
-_ostree_metalink_free (OstreeMetalink *self)
+_ostree_metalink_finalize (GObject *object)
 {
+  OstreeMetalink *self;
+
+  self = OSTREE_METALINK (object);
+
   g_object_unref (self->task);
   g_object_unref (self->fetcher);
   g_free (self->requested_file);
   g_free (self->verification_sha256);
   g_free (self->verification_sha512);
   g_ptr_array_unref (self->urls);
-  g_free (self);
+
+  G_OBJECT_CLASS (_ostree_metalink_parent_class)->finalize (object);
+}
+
+static void
+_ostree_metalink_class_init (OstreeMetalinkClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->finalize = _ostree_metalink_finalize;
+}
+
+static void
+_ostree_metalink_init (OstreeMetalink *self)
+{
 }
 
 typedef struct
@@ -451,7 +489,6 @@ try_one_url (GObject        *fetcher,
       out->data = g_bytes_ref (bytes);
       out->target_uri = soup_uri_copy (self->urls->pdata[self->current_url_index]);
       g_task_return_pointer (self->task, out, g_free);
-      _ostree_metalink_free (self);
     }
   else
     {
@@ -462,7 +499,6 @@ try_one_url (GObject        *fetcher,
                           "Exhausted %u metalink targets, last error: ",
                           self->urls->len);
           g_task_return_error (self->task, local_error);
-          _ostree_metalink_free (self);
         }
       else
         {
@@ -564,7 +600,6 @@ metalink_fetch_on_complete (GObject           *object,
   if (local_error != NULL)
     {
       g_task_return_error (self->task, local_error);
-      _ostree_metalink_free(self);
     }
 }
 
@@ -578,13 +613,12 @@ _ostree_metalink_request_async (OstreeFetcher         *fetcher,
                                 gpointer               user_data,
                                 GCancellable          *cancellable)
 {
-  OstreeMetalink *self = g_new0(OstreeMetalink, 1);
-
+  glnx_unref_object OstreeMetalink *self = g_object_new (OSTREE_TYPE_METALINK, NULL);
   self->fetcher = g_object_ref (fetcher);
   self->requested_file = g_strdup (requested_file);
   self->max_size = max_size;
   self->priority = priority;
-  self->task = g_task_new (NULL, cancellable, callback, user_data);
+  self->task = g_task_new (self, cancellable, callback, user_data);
   g_task_set_source_tag (self->task, _ostree_metalink_request_async);
   self->urls = g_ptr_array_new_with_free_func ((GDestroyNotify) soup_uri_free);
 

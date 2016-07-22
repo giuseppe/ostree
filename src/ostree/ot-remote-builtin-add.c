@@ -42,7 +42,7 @@ static GOptionEntry option_entries[] = {
 gboolean
 ot_remote_builtin_add (int argc, char **argv, GCancellable *cancellable, GError **error)
 {
-  GOptionContext *context;
+  g_autoptr(GOptionContext) context;
   glnx_unref_object OstreeRepo *repo = NULL;
   const char *remote_name;
   const char *remote_url;
@@ -50,6 +50,7 @@ ot_remote_builtin_add (int argc, char **argv, GCancellable *cancellable, GError 
   g_autofree char *target_name = NULL;
   g_autoptr(GFile) target_conf = NULL;
   g_autoptr(GVariantBuilder) optbuilder = NULL;
+  g_autoptr(GVariant) opt = NULL;
   gboolean ret = FALSE;
 
   context = g_option_context_new ("NAME URL [BRANCH...] - Add a remote repository");
@@ -101,11 +102,13 @@ ot_remote_builtin_add (int argc, char **argv, GCancellable *cancellable, GError 
                            "gpg-verify",
                            g_variant_new_variant (g_variant_new_boolean (FALSE)));
 
+  opt = g_variant_builder_end (optbuilder);
+
   if (!ostree_repo_remote_change (repo, NULL,
                                   opt_if_not_exists ? OSTREE_REPO_REMOTE_CHANGE_ADD_IF_NOT_EXISTS : 
                                   OSTREE_REPO_REMOTE_CHANGE_ADD,
                                   remote_name, remote_url,
-                                  g_variant_builder_end (optbuilder),
+                                  opt,
                                   cancellable, error))
     goto out;
 
@@ -138,7 +141,6 @@ ot_remote_builtin_add (int argc, char **argv, GCancellable *cancellable, GError 
 
   ret = TRUE;
  out:
-  g_option_context_free (context);
 
   return ret;
 }

@@ -1,1 +1,8 @@
 # Use this to suppress "possibly lost" for global statics
+
+{
+    constructor
+    Memcheck:Leak
+    ...
+    fun:gobject_init_ctor
+}

@@ -43,7 +43,7 @@ typedef struct
 } FetchMetalinkResult;
 
 FetchMetalinkResult*
-_ostree_metalink_request_finish (GObject               *object,
+_ostree_metalink_request_finish (GObject               *self,
                                  GAsyncResult          *result,
                                  GError               **error);
 

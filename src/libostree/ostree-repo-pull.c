@@ -2356,7 +2356,7 @@ metalink_fetch_on_complete (GObject        *object,
   GError **error = &local_error;
 
   FetchMetalinkResult* out = _ostree_metalink_request_finish (object, result, error);
-  if(error != NULL)
+  if (local_error != NULL)
       goto out;
 
   {
