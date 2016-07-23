@@ -1,0 +1,50 @@
+<node name="/ostree/fetch">
+  <interface name="ostree.fetch.service">
+    <annotation name="org.freedesktop.DBus.GLib.CSymbol" value="fetch_service"/>
+    <method name="fetch_object">
+      <arg name="objtype" type="y" direction="in"/>
+      <arg name="checksum" type="s" direction="in"/>
+      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+    </method>
+    <method name="fetch_delta_part">
+      <arg name="from_revision" type="s" direction="in"/>
+      <arg name="to_revision" type="s" direction="in"/>
+      <arg name="branch" type="s" direction="in"/>
+      <arg name="index" type="i" direction="in"/>
+      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+    </method>
+    <method name="fetch_delta_super">
+      <arg name="from_revision" type="s" direction="in"/>
+      <arg name="to_revision" type="s" direction="in"/>
+      <arg name="branch" type="s" direction="in"/>
+      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+    </method>
+    <method name="fetch_ref">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+    <method name="fetch_summary">
+      <arg name="result" type="ay" direction="out"/>
+    </method>
+    <method name="fetch_summary_sig">
+      <arg name="result" type="ay" direction="out"/>
+    </method>
+    <method name="fetch_config">
+      <arg name="result" type="s" direction="out"/>
+    </method>
+    <method name="open_url">
+      <arg name="base_uri" type="s" direction="in"/>
+    </method>
+    <method name="open_metalink">
+      <arg name="metalink_uri" type="s" direction="in"/>
+    </method>
+    <method name="open_local">
+      <arg name="path" type="s" direction="in"/>
+    </method>
+    <signal name="progress">
+      <arg name="uint" type="a{sq}"/>
+      <arg name="uint64" type="a{st}"/>
+      <arg name="status" type="s"/>
+    </signal>
+  </interface>
+</node>
