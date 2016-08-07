@@ -1,0 +1,206 @@
+fixed, basic	BYTE	121 (ASCII 'y')	8-bit unsigned integer
+fixed, basic	BOOLEAN	98 (ASCII 'b')	Boolean value, 0 is FALSE and 1 is TRUE. Everything else is invalid.
+fixed, basic	INT16	110 (ASCII 'n')	16-bit signed integer
+fixed, basic	UINT16	113 (ASCII 'q')	16-bit unsigned integer
+fixed, basic	INT32	105 (ASCII 'i')	32-bit signed integer
+fixed, basic	UINT32	117 (ASCII 'u')	32-bit unsigned integer
+fixed, basic	INT64	120 (ASCII 'x')	64-bit signed integer
+fixed, basic	UINT64	116 (ASCII 't')	64-bit unsigned integer
+fixed, basic	DOUBLE	100 (ASCII 'd')	IEEE 754 double
+string-like, basic	STRING	115 (ASCII 's')	UTF-8 string (must be valid UTF-8). Must be nul terminated and contain no other nul bytes.
+string-like, basic	OBJECT_PATH	111 (ASCII 'o')	Name of an object instance
+string-like, basic	SIGNATURE	103 (ASCII 'g')	A type signature
+container	ARRAY	97 (ASCII 'a')	Array
+container	STRUCT	114 (ASCII 'r'), 40 (ASCII '('), 41 (ASCII ')')	Struct; type code 114 'r' is reserved for use in bindings and implementations to represent the general concept of a struct, and must not appear in signatures used on D-Bus.
+container	VARIANT	118 (ASCII 'v') 	Variant type (the type of the value is part of the value itself)
+container	DICT_ENTRY	101 (ASCII 'e'), 123 (ASCII '{'), 125 (ASCII '}') 	Entry in a dict or map (array of key-value pairs). Type code 101 'e' is reserved for use in bindings and implementations to represent the general concept of a dict or dict-entry, and must not appear in signatures used on D-Bus.
+fixed, basic	UNIX_FD	104 (ASCII 'h')	Unix file descriptor
+
+STRUCT has a type code, ASCII character 'r', but this type code does not appear in signatures. Instead, ASCII characters '(' and ')' are used to mark the beginning and end of the struct. So for example, a struct containing two integers would have this signature:
+          "(ii)"
+Structs can be nested, so for example a struct containing an integer and another struct:
+          "(i(ii))"
+The value block storing that struct would contain three integers; the type signature allows you to distinguish "(i(ii))" from "((ii)i)" or "(iii)" or "iii".
+ARRAY has ASCII character 'a' as type code. The array type code must be followed by a single complete type. The single complete type following the array is the type of each array element. So the simple example is:
+          "ai"
+which is an array of 32-bit integers. But an array can be of any type, such as this array-of-struct-with-two-int32-fields:
+          "a(ii)"
+Or this array of array of integer:
+          "aai"
+VARIANT has ASCII character 'v' as its type code. A marshaled value of type VARIANT will have the signature of a single complete type as part of the value. This signature will be followed by a marshaled value of that type.
+Unlike a message signature, the variant signature can contain only a single complete type. So "i", "ai" or "(ii)" is OK, but "ii" is not. Use of variants may not cause a total message depth to be larger than 64, including other container types such as structures.
+A DICT_ENTRY works exactly like a struct, but rather than parentheses it uses curly braces, and it has more restrictions. The restrictions are: it occurs only as an array element type; it has exactly two single complete types inside the curly braces; the first single complete type (the "key") must be a basic type rather than a container type. Implementations must not accept dict entries outside of arrays, must not accept dict entries with zero, one, or more than two fields, and must not accept dict entries with non-basic-typed keys. A dict entry is always a key-value pair. The first field in the DICT_ENTRY is always the key. A message is considered corrupt if the same key occurs twice in the same array of DICT_ENTRY. However, for performance reasons implementations are not required to reject dicts with duplicate keys. In most languages, an array of dict entry would be represented as a map, hash table, or dict object.
+
+The generated MyAppFrobber interface is designed so it is easy to implement it in a GObject subclass. For example, to handle HelloWorld() method invocations, set the vfunc for handle_hello_hello_world() in the MyAppFrobberIface structure. Similary, to handle the net.Corp.MyApp.Frobber:Verbose property override the :verbose GObject property from the subclass. To emit a signal, use e.g. my_app_emit_signal() or g_signal_emit_by_name().
+
+Instead of subclassing, it is often easier to use the generated MyAppFrobberSkeleton subclass. To handle incoming method calls, use g_signal_connect() with the ::handle-* signals and instead of overriding GObject's get_property() and set_property() vfuncs, use g_object_get() and g_object_set() or the generated property getters and setters (the generated class has an internal property bag implementation).
+
+
+static gboolean
+on_handle_hello_world (MyAppFrobber           *interface,
+                       GDBusMethodInvocation  *invocation,
+                       const gchar            *greeting,
+                       gpointer                user_data)
+{
+  if (g_strcmp0 (greeting, "Boo") != 0)
+    {
+      gchar *response;
+      response = g_strdup_printf ("Word! You said `%s'.", greeting);
+      my_app_complete_hello_world (interface, invocation, response);
+      g_free (response);
+    }
+  else
+    {
+      g_dbus_method_invocation_return_error (invocation,
+                 MY_APP_ERROR,
+                 MY_APP_ERROR_NO_WHINING,
+                 "Hey, %s, there will be no whining!",
+                 g_dbus_method_invocation_get_sender (invocation));
+    }
+  return TRUE;
+}
+
+  [...]
+
+
+#include "config.h"
+#include <gio/gio.h>
+#include <sys/socket.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+#define GCLUE_TYPE_SERVICE_MANAGER            (gclue_service_manager_get_type())
+#define GCLUE_SERVICE_MANAGER(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManager))
+#define GCLUE_SERVICE_MANAGER_CONST(obj)      (G_TYPE_CHECK_INSTANCE_CAST ((obj), GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManager const))
+#define GCLUE_SERVICE_MANAGER_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass),  GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManagerClass))
+#define GCLUE_IS_SERVICE_MANAGER(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GCLUE_TYPE_SERVICE_MANAGER))
+#define GCLUE_IS_SERVICE_MANAGER_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass),  GCLUE_TYPE_SERVICE_MANAGER))
+#define GCLUE_SERVICE_MANAGER_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj),  GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManagerClass))
+
+typedef struct _GClueServiceManager        GClueServiceManager;
+typedef struct _GClueServiceManagerClass   GClueServiceManagerClass;
+typedef struct _GClueServiceManagerPrivate GClueServiceManagerPrivate;
+
+struct _GClueServiceManager
+{
+        GClueDBusManagerSkeleton parent;
+
+        GDBusConnection *connection;
+        GHashTable *clients;
+
+        guint num_clients;
+};
+
+struct _GClueServiceManagerClass
+{
+        GClueDBusManagerSkeletonClass parent_class;
+};
+
+GType gclue_service_manager_get_type (void) G_GNUC_CONST;
+
+GClueServiceManager * gclue_service_manager_new        (GDBusConnection *connection,
+                                                        GError         **error);
+gboolean              gclue_service_manager_get_active (GClueServiceManager *manager);
+
+static void
+gclue_service_manager_manager_iface_init (GClueManagerIface *iface);
+static void
+gclue_service_manager_initable_iface_init (GInitableIface *iface);
+
+G_DEFINE_TYPE_WITH_CODE (GClueServiceManager,
+                         gclue_service_manager,
+                         GCLUE_TYPE_MANAGER_SKELETON,
+                         G_IMPLEMENT_INTERFACE (GCLUE_TYPE_MANAGER,
+                                                gclue_service_manager_manager_iface_init)
+                         G_IMPLEMENT_INTERFACE (G_TYPE_INITABLE,
+                                                gclue_service_manager_initable_iface_init))
+
+static gboolean
+gclue_service_manager_handle_get_client (GClueManager          *manager,
+                                         GDBusMethodInvocation *invocation)
+{
+        GClueServiceManager *self = GCLUE_SERVICE_MANAGER (manager);
+        g_dbus_method_invocation_return_error (invocation,
+                                                G_DBUS_ERROR,
+                                                G_DBUS_ERROR_FAILED,
+                                                error->message);
+        gclue_manager_complete_get_client (manager, invocation, path);
+}
+
+static void
+gclue_service_manager_finalize (GObject *object)
+{
+        GClueServiceManagerPrivate *priv = GCLUE_SERVICE_MANAGER (object)->priv;
+
+        g_clear_object (&priv->connection);
+        g_clear_pointer (&priv->clients, g_hash_table_unref);
+
+        /* Chain up to the parent class */
+        G_OBJECT_CLASS (gclue_service_manager_parent_class)->finalize (object);
+}
+
+static void
+gclue_service_manager_class_init (GClueServiceManagerClass *klass)
+{
+        GObjectClass *object_class;
+
+        object_class = G_OBJECT_CLASS (klass);
+        object_class->finalize = gclue_service_manager_finalize;
+}
+
+static void
+gclue_service_manager_init (GClueServiceManager *manager)
+{
+}
+
+static void
+gclue_service_manager_manager_iface_init (GClueManagerIface *iface)
+{
+        iface->handle_get_client = gclue_service_manager_handle_get_client;
+}
+
+static void
+gclue_service_manager_initable_iface_init (GInitableIface *iface)
+{
+        iface->init = gclue_service_manager_initable_init;
+}
+
+GClueServiceManager *
+gclue_service_manager_new (GDBusConnection *connection,
+                           GError         **error)
+{
+        return g_initable_new (GCLUE_TYPE_SERVICE_MANAGER,
+                               NULL,
+                               error,
+                               "connection", connection,
+                               NULL);
+}
+typedef struct {
+  GDBusInterfaceSkeleton parent;
+  gint number;
+} MockInterface;
+
+typedef struct {
+  GDBusInterfaceSkeletonClass parent_class;
+} MockInterfaceClass;
+
+static GType mock_interface_get_type (void);
+G_DEFINE_TYPE (MockInterface, mock_interface, G_TYPE_DBUS_INTERFACE_SKELETON);
+
+static void
+mock_interface_init (MockInterface *self)
+{
+
+}
+
+  server = g_dbus_object_manager_server_new (object_path);
+  mock = g_object_new (mock_interface_get_type (), NULL);
+  skeleton = g_dbus_object_skeleton_new (number1_path);
+  g_dbus_object_skeleton_add_interface (skeleton, G_DBUS_INTERFACE_SKELETON (mock));
+  g_dbus_object_manager_server_export (server, skeleton);
+
+  g_dbus_object_manager_client_new (test->client, G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,
+                                    dbus_name, object_path, NULL, NULL, NULL, NULL, on_result, test);
+  proxy = g_dbus_object_manager_get_interface (client, number1_path, "org.mock.Interface");

@@ -36,9 +36,6 @@
 
 #include <gio/gunixinputstream.h>
 
-#define OSTREE_REPO_PULL_CONTENT_PRIORITY  (OSTREE_FETCHER_DEFAULT_PRIORITY)
-#define OSTREE_REPO_PULL_METADATA_PRIORITY (OSTREE_REPO_PULL_CONTENT_PRIORITY - 100)
-
 typedef enum {
   FETCH_METADATA,
   FETCH_CONTENT,
@@ -49,6 +46,7 @@ typedef enum {
   FETCH_SUMMARY_SIG,
   FETCH_CONFIG,
   FETCH_METALINK,
+  CONNECT_DBUS,
   MAX_FETCH_TYPES
 } FetchType;
 
@@ -57,19 +55,15 @@ typedef struct {
   int           tmpdir_dfd;
   OstreeRepoPullFlags flags;
   char         *remote_name;
-  OstreeFetcher *fetcher;
   GMainContext    *main_context;
   GCancellable *cancellable;
 
   OstreeAsyncProgress *progress;
-  guint64           start_time;
   guint             n_outstanding[MAX_FETCH_TYPES];
   guint             n_outstanding_write_requests[MAX_FETCH_TYPES];
   guint             n_fetched[MAX_FETCH_TYPES];
   guint             n_requested[MAX_FETCH_TYPES];
 
-  SoupURI          *base_uri;
-  OstreeRepo       *remote_repo_local;
   gboolean          is_untrusted;
   OstreeRepoMode    remote_mode;
   gboolean          has_tombstone_commits;
@@ -110,8 +104,6 @@ typedef struct {
   gboolean          commitpartial_exists;
   gboolean          gpg_verify;
   gboolean          is_commit_only;
-
-
 
   GError      **async_error;
   gboolean      caught_error;
@@ -179,44 +171,6 @@ static void
 fetch_object (OtPullData      *pull_data,
               char            *checksum,
               OstreeObjectType objtype);
-
-static SoupURI *
-suburi_new (SoupURI   *base,
-            const char *first,
-            ...) G_GNUC_NULL_TERMINATED;
-
-static SoupURI *
-suburi_new (SoupURI   *base,
-            const char *first,
-            ...)
-{
-  va_list args;
-  GPtrArray *arg_array;
-  const char *arg;
-  char *subpath;
-  SoupURI *ret;
-
-  arg_array = g_ptr_array_new ();
-  g_ptr_array_add (arg_array, (char*)soup_uri_get_path (base));
-  g_ptr_array_add (arg_array, (char*)first);
-
-  va_start (args, first);
-  
-  while ((arg = va_arg (args, const char *)) != NULL)
-    g_ptr_array_add (arg_array, (char*)arg);
-  g_ptr_array_add (arg_array, NULL);
-
-  subpath = g_build_filenamev ((char**)arg_array->pdata);
-  g_ptr_array_unref (arg_array);
-  
-  ret = soup_uri_copy (base);
-  soup_uri_set_path (ret, subpath);
-  g_free (subpath);
-  
-  va_end (args);
-  
-  return ret;
-}
 
 static gboolean
 update_progress (gpointer user_data)
@@ -2003,6 +1957,20 @@ process_summary (OtPullData    *pull_data,
     goto out;
   }
 
+  if (pull_data->is_mirror && pull_data->summary_data)
+    {
+      if (!ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary",
+                                        pull_data->summary_data, !pull_data->repo->disable_fsync,
+                                        cancellable, error))
+        goto out;
+
+      if (pull_data->summary_data_sig &&
+          !ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary.sig",
+                                        pull_data->summary_data_sig, !pull_data->repo->disable_fsync,
+                                        cancellable, error))
+        goto out;
+    }
+
   if (pull_data->summary)
     {
       g_autoptr(GVariant) refs = NULL;
@@ -2354,8 +2322,82 @@ metalink_fetch_on_complete (GObject        *object,
   check_outstanding_requests_handle_error (pull_data, local_error);
 }
 
+static void
+on_client_connection (GObject        *object,
+                      GAsyncResult   *result,
+                      gpointer        user_data)
+{
+  OtPullData *pull_data = user_data;
+  GError *local_error = NULL;
+  GError **error = &local_error;
+  GDBusConnection* connection = g_dbus_connection_new_finish (result, error);
+  OstreeFetchService * fetcher = ostree_fetch_service_proxy_new_sync (connection,
+    G_DBUS_PROXY_FLAGS_NONE, "ostree.fetch.service", "/ostree/fetch", pull_data->cancellable, error);
+  if(fetcher == NULL)
+    goto out;
+  pull_data->fetcher = fetcher;
+
+  /* At this point, all fields of pull_data are initialized besides:
+   * - base_uri (filled in from metalink or ostree_repo_remote_get_url)
+   * - summary* (filled in by fetching the summary or from cache)
+   * - remote_repo_local, remote_mode, has_tombstone_commits (filled in from config)
+   */
+
+  if (!ostree_repo_get_remote_option (self,
+                                      remote_name_or_baseurl, "metalink",
+                                      NULL, &metalink_url_str, error))
+    goto out;
+
+  if (!metalink_url_str)
+    {
+      g_autofree char *baseurl = NULL;
+
+      if (url_override != NULL)
+        baseurl = g_strdup (url_override);
+      else if (!ostree_repo_remote_get_url (self, remote_name_or_baseurl, &baseurl, error))
+        goto out;
+
+      pull_data->base_uri = soup_uri_new (baseurl);
+
+      if (!pull_data->base_uri)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Failed to parse url '%s'", baseurl);
+          goto out;
+        }
+
+      fetch_config (pull_data, cancellable, error);
+    }
+  else
+    {
+      SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
+      if (!metalink_uri)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Invalid metalink URL: %s", metalink_url_str);
+          goto out;
+        }
+      pull_data->n_outstanding[FETCH_METALINK]++;
+      _ostree_metalink_request_async (pull_data->fetcher,
+                                      metalink_uri,
+                                      "summary",
+                                      OSTREE_MAX_METADATA_SIZE,
+                                      OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                      metalink_fetch_on_complete,
+                                      pull_data,
+                                      cancellable);
+      soup_uri_free (metalink_uri);
+    }
+
+ out:
+  g_assert (pull_data->n_outstanding[FETCH_METALINK] > 0);
+  pull_data->n_outstanding[FETCH_METALINK]--;
+  pull_data->n_fetched[FETCH_METALINK]++;
+  check_outstanding_requests_handle_error (pull_data, local_error);
+}
+
 /* ------------------------------------------------------------------------------------------
- * Below is the libsoup-invariant API; these should match
+ * Below is the public API; these should match
  * the stub functions in the #else clause
  * ------------------------------------------------------------------------------------------
  */
@@ -2402,6 +2444,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   guint64 end_time;
   GSource *update_timeout = NULL;
   gsize i;
+  glnx_unref_object GSubprocess *subprocess = NULL;
 
   g_autofree char **refs_to_fetch = NULL;
   OstreeRepoPullFlags flags = 0;
@@ -2590,61 +2633,41 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   if (pull_data->legacy_transaction_resuming)
     g_debug ("resuming legacy transaction");
 
-  pull_data->fetcher = _ostree_repo_remote_new_fetcher (self, remote_name_or_baseurl, error);
-  if (pull_data->fetcher == NULL)
-    goto out;
+  {
+    glnx_unref_object GSocket *socket;
+    glnx_unref_object GSocketConnection *stream;
+    glnx_unref_object GSubprocessLauncher *launcher = NULL;
+    int pair[2];
 
-  /* At this point, all fields of pull_data are initialized besides:
-   * - base_uri (filled in from metalink or ostree_repo_remote_get_url)
-   * - summary* (filled in by fetching the summary or from cache)
-   * - remote_repo_local, remote_mode, has_tombstone_commits (filled in from config)
-   */
-
-  if (!ostree_repo_get_remote_option (self,
-                                      remote_name_or_baseurl, "metalink",
-                                      NULL, &metalink_url_str, error))
-    goto out;
-
-  if (!metalink_url_str)
-    {
-      g_autofree char *baseurl = NULL;
-
-      if (url_override != NULL)
-        baseurl = g_strdup (url_override);
-      else if (!ostree_repo_remote_get_url (self, remote_name_or_baseurl, &baseurl, error))
+    if (socketpair (AF_UNIX, SOCK_STREAM, 0, pair) < 0)
+      {
+        g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
         goto out;
+      }
 
-      pull_data->base_uri = soup_uri_new (baseurl);
+    g_debug ("Established socket pair: (%d, %d)\n", pair[0], pair[1]);
+    /* Build up the client dbus connection */
+    socket = g_socket_new_from_fd (pair[0], error);
+    if(socket == NULL)
+      goto out;
 
-      if (!pull_data->base_uri)
-        {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Failed to parse url '%s'", baseurl);
-          goto out;
-        }
+    stream = g_socket_connection_factory_create_connection (socket);
+    if(stream == NULL)
+      goto out;
 
-      fetch_config (pull_data, cancellable, error);
-    }
-  else
-    {
-      SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
-      if (!metalink_uri)
-        {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Invalid metalink URL: %s", metalink_url_str);
-          goto out;
-        }
-      pull_data->n_outstanding[FETCH_METALINK]++;
-      _ostree_metalink_request_async (pull_data->fetcher,
-                                      metalink_uri,
-                                      "summary",
-                                      OSTREE_MAX_METADATA_SIZE,
-                                      OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                      metalink_fetch_on_complete,
-                                      pull_data,
-                                      cancellable);
-      soup_uri_free (metalink_uri);
-    }
+    g_dbus_connection_new (G_IO_STREAM (stream), NULL,
+                          G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+                          G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_ALLOW_ANONYMOUS,
+                          NULL, cancellable, on_client_connection, pull_data);
+
+    g_debug ("launching ostree-repo-pull subprocess");
+    launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_NONE);
+    // TODO: g_subprocess_launcher_set_child_setup (launcher, child_setup, NULL, NULL);
+    g_subprocess_launcher_take_fd (launcher, pair[1], 3); // STDERR_FILENO + 1
+    subprocess = g_subprocess_launcher_spawn (launcher, error, "ostree-repo-pull","--socketfd","3", NULL);
+    if (subprocess == NULL)
+      goto out;
+  }
 
   /* Now await work completion */
   while (!pull_termination_condition (pull_data))
@@ -2689,20 +2712,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
           ostree_repo_transaction_set_ref (pull_data->repo, pull_data->is_mirror ? NULL : pull_data->remote_name,
                                           ref, checksum);
         }
-    }
-
-  if (pull_data->is_mirror && pull_data->summary_data)
-    {
-      if (!ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary",
-                                        pull_data->summary_data, !pull_data->repo->disable_fsync,
-                                        cancellable, error))
-        goto out;
-
-      if (pull_data->summary_data_sig &&
-          !ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary.sig",
-                                        pull_data->summary_data_sig, !pull_data->repo->disable_fsync,
-                                        cancellable, error))
-        goto out;
     }
 
   if (!ostree_repo_commit_transaction (pull_data->repo, NULL, cancellable, error))

@@ -2,35 +2,41 @@
   <interface name="ostree.fetch.service">
     <annotation name="org.freedesktop.DBus.GLib.CSymbol" value="fetch_service"/>
     <method name="fetch_object">
-      <arg name="objtype" type="y" direction="in"/>
+      <arg name="objtype" type="u" direction="in"/>
       <arg name="checksum" type="s" direction="in"/>
-      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+      <arg name="max_size" type="t" direction="in"/>
+      <arg name="temp_path" type="s" direction="out"/>
     </method>
     <method name="fetch_delta_part">
       <arg name="from_revision" type="s" direction="in"/>
       <arg name="to_revision" type="s" direction="in"/>
-      <arg name="branch" type="s" direction="in"/>
       <arg name="index" type="i" direction="in"/>
-      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+      <arg name="max_size" type="t" direction="in"/>
+      <arg name="temp_path" type="s" direction="out"/>
     </method>
     <method name="fetch_delta_super">
       <arg name="from_revision" type="s" direction="in"/>
       <arg name="to_revision" type="s" direction="in"/>
       <arg name="branch" type="s" direction="in"/>
-      <annotation name="org.gtk.GDBus.C.UnixFD" value="yes"/>
+      <arg name="temp_path" type="s" direction="out"/>
     </method>
     <method name="fetch_ref">
       <arg name="name" type="s" direction="in"/>
       <arg name="result" type="s" direction="out"/>
     </method>
     <method name="fetch_summary">
-      <arg name="result" type="ay" direction="out"/>
+      <arg name="result" type="ay" direction="out">
+        <annotation name="org.gtk.GDBus.C.ForceGVariant" value="true"/>
+      </arg>
     </method>
     <method name="fetch_summary_sig">
-      <arg name="result" type="ay" direction="out"/>
+      <arg name="result" type="ay" direction="out">
+        <annotation name="org.gtk.GDBus.C.ForceGVariant" value="true"/>
+      </arg>
     </method>
     <method name="fetch_config">
-      <arg name="result" type="s" direction="out"/>
+      <arg name="remote_mode" type="u" direction="out"/>
+      <arg name="has_tombstone_comits" type="b" direction="out"/>
     </method>
     <method name="open_url">
       <arg name="base_uri" type="s" direction="in"/>
@@ -38,13 +44,15 @@
     <method name="open_metalink">
       <arg name="metalink_uri" type="s" direction="in"/>
     </method>
-    <method name="open_local">
-      <arg name="path" type="s" direction="in"/>
+    <method name="new">
+      <arg name="tls_permissive" type="b" direction="in"/>
+      <arg name="tls_client_cert_path" type="s" direction="in"/>
+      <arg name="tls_client_key_path" type="s" direction="in"/>
+      <arg name="tls_ca_path" type="s" direction="in"/>
+      <arg name="http_proxy" type="s" direction="in"/>
     </method>
-    <signal name="progress">
-      <arg name="uint" type="a{sq}"/>
-      <arg name="uint64" type="a{st}"/>
-      <arg name="status" type="s"/>
-    </signal>
+    <method name="progress">
+      <arg name="bytes_transferred" type="t" direction="out"/>
+    </method>
   </interface>
 </node>

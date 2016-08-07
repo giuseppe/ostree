@@ -136,12 +136,6 @@ libostree_1_la_SOURCES += src/libostree/ostree-libarchive-input-stream.h \
 	src/libostree/ostree-libarchive-input-stream.c \
 	$(NULL)
 endif
-if HAVE_LIBSOUP_CLIENT_CERTS
-libostree_1_la_SOURCES += \
-	src/libostree/ostree-tls-cert-interaction.c \
-	src/libostree/ostree-tls-cert-interaction.h \
-	$(NULL)
-endif
 
 libostree_1_la_CFLAGS = $(AM_CFLAGS) -I$(srcdir)/bsdiff -I$(srcdir)/libglnx -I$(srcdir)/src/libotutil -I$(srcdir)/src/libostree -I$(builddir)/src/libostree \
 	$(OT_INTERNAL_GIO_UNIX_CFLAGS) $(OT_INTERNAL_GPGME_CFLAGS) $(OT_DEP_LZMA_CFLAGS) $(OT_DEP_ZLIB_CFLAGS) \
@@ -160,17 +154,6 @@ endif
 if BUILDOPT_LIBSYSTEMD
 libostree_1_la_CFLAGS += $(LIBSYSTEMD_CFLAGS)
 libostree_1_la_LIBADD += $(LIBSYSTEMD_LIBS)
-endif
-
-if USE_LIBSOUP
-libostree_1_la_SOURCES += \
-	src/libostree/ostree-fetcher.h \
-	src/libostree/ostree-fetcher.c \
-	src/libostree/ostree-metalink.h \
-	src/libostree/ostree-metalink.c \
-	$(NULL)
-libostree_1_la_CFLAGS += $(OT_INTERNAL_SOUP_CFLAGS)
-libostree_1_la_LIBADD += $(OT_INTERNAL_SOUP_LIBS)
 endif
 
 if USE_LIBMOUNT
