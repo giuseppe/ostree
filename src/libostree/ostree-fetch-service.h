@@ -4,8 +4,8 @@
  * The license of this code is the same as for the source it was derived from.
  */
 
-#ifndef __FETCH_DBUS_H__
-#define __FETCH_DBUS_H__
+#ifndef __OSTREE_FETCH_SERVICE_H__
+#define __OSTREE_FETCH_SERVICE_H__
 
 #include <gio/gio.h>
 
@@ -493,4 +493,4 @@ OstreeFetchService *ostree_fetch_service_skeleton_new (void);
 
 G_END_DECLS
 
-#endif /* __FETCH_DBUS_H__ */
+#endif /* __OSTREE_FETCH_SERVICE_H__ */

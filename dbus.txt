@@ -63,14 +63,6 @@ on_handle_hello_world (MyAppFrobber           *interface,
   [...]
 
 
-#include "config.h"
-#include <gio/gio.h>
-#include <sys/socket.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdlib.h>
-
 #define GCLUE_TYPE_SERVICE_MANAGER            (gclue_service_manager_get_type())
 #define GCLUE_SERVICE_MANAGER(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManager))
 #define GCLUE_SERVICE_MANAGER_CONST(obj)      (G_TYPE_CHECK_INSTANCE_CAST ((obj), GCLUE_TYPE_SERVICE_MANAGER, GClueServiceManager const))

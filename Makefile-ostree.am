@@ -116,7 +116,31 @@ ostree_LDADD += $(OT_INTERNAL_SOUP_LIBS)
 
 bin_PROGRAMS += ostree-repo-pull
 
+EXTRA_DIST += src/libostree/ostree-enumtypes.h.template \
+		src/libostree/ostree-enumtypes.c.template
+
+ENUM_TYPES = $(srcdir)/src/libostree/ostree-fetcher.h
+
+src/libostree/ostree-enumtypes.h: src/libostree/ostree-enumtypes.h.template $(ENUM_TYPES)
+	$(AM_V_GEN) $(GLIB_MKENUMS) \
+	--template $< \
+	$(ENUM_TYPES) > $@.tmp && mv $@.tmp $@
+
+src/libostree/ostree-enumtypes.c: src/libostree/ostree-enumtypes.c.template $(ENUM_TYPES)
+	$(AM_V_GEN) $(GLIB_MKENUMS) \
+	--template $< \
+	--fhead "#include \"ostree-enumtypes.h\"" \
+	$(ENUM_TYPES) > $@.tmp && mv $@.tmp $@
+
+ENUM_GENERATED = \
+	src/libostree/ostree-enumtypes.h \
+	src/libostree/ostree-enumtypes.c \
+	$(NULL)
+
+BUILT_SOURCES += $(ENUM_GENERATED)
+
 ostree_repo_pull_SOURCES = \
+	$(ENUM_GENERATED) \
 	src/libostree/ostree-repo-pull-soup.c \
 	src/libostree/ostree-fetcher.h \
 	src/libostree/ostree-fetcher.c \

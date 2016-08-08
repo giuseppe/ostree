@@ -8,7 +8,7 @@
 #  include "config.h"
 #endif
 
-#include "fetch_dbus.h"
+#include "ostree-fetch-service.h"
 
 #include <string.h>
 #ifdef G_OS_UNIX

@@ -33,32 +33,6 @@ lib_LTLIBRARIES += libostree-1.la
 libostreeincludedir = $(includedir)/ostree-1
 libostreeinclude_HEADERS = $(libostree_public_headers)
 
-ENUM_TYPES = $(NULL)
-
-if USE_LIBSOUP
-ENUM_TYPES += $(srcdir)/src/libostree/ostree-fetcher.h
-endif
-
-src/libostree/ostree-enumtypes.h: src/libostree/ostree-enumtypes.h.template $(ENUM_TYPES)
-	$(AM_V_GEN) $(GLIB_MKENUMS) \
-	--template $< \
-	$(ENUM_TYPES) > $@.tmp && mv $@.tmp $@
-
-src/libostree/ostree-enumtypes.c: src/libostree/ostree-enumtypes.c.template $(ENUM_TYPES)
-	$(AM_V_GEN) $(GLIB_MKENUMS) \
-	--template $< \
-	--fhead "#include \"ostree-enumtypes.h\"" \
-	$(ENUM_TYPES) > $@.tmp && mv $@.tmp $@
-
-if USE_LIBSOUP
-ENUM_GENERATED = \
-	src/libostree/ostree-enumtypes.h \
-	src/libostree/ostree-enumtypes.c \
-	$(NULL)
-
-BUILT_SOURCES += $(ENUM_GENERATED)
-endif
-
 CLEANFILES += $(BUILT_SOURCES)
 
 libbupsplit_la_SOURCES = \
@@ -67,17 +41,18 @@ libbupsplit_la_SOURCES = \
 	$(NULL)
 
 libostree_1_la_SOURCES = \
-	$(ENUM_GENERATED) \
 	src/libostree/ostree-async-progress.c \
 	src/libostree/ostree-cmdprivate.h \
 	src/libostree/ostree-cmdprivate.c \
 	src/libostree/ostree-core-private.h \
 	src/libostree/ostree-core.c \
-	src/libostree/ostree-dummy-enumtypes.c \
 	src/libostree/ostree-checksum-input-stream.c \
 	src/libostree/ostree-checksum-input-stream.h \
 	src/libostree/ostree-chain-input-stream.c \
 	src/libostree/ostree-chain-input-stream.h \
+	src/libostree/ostree-dummy-enumtypes.c \
+	src/libostree/ostree-fetch-service.c \
+	src/libostree/ostree-fetch-service.h \
 	src/libostree/ostree-lzma-common.c \
 	src/libostree/ostree-lzma-common.h \
 	src/libostree/ostree-lzma-compressor.c \
@@ -186,8 +161,6 @@ pkgconfig_DATA += src/libostree/ostree-1.pc
 gpgreadme_DATA = src/libostree/README-gpg
 gpgreadmedir = $(pkgdatadir)/trusted.gpg.d
 EXTRA_DIST += src/libostree/README-gpg src/libostree/bupsplit.h \
-		src/libostree/ostree-enumtypes.h.template \
-		src/libostree/ostree-enumtypes.c.template \
 		src/libostree/ostree-deployment-private.h
 
 install-mkdir-remotes-d-hook:
