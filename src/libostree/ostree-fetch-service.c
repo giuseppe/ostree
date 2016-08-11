@@ -293,33 +293,11 @@ static const _ExtendedGDBusMethodInfo _ostree_fetch_service_method_info_fetch_de
   FALSE
 };
 
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_from_revision =
+static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_name =
 {
   {
     -1,
-    (gchar *) "from_revision",
-    (gchar *) "s",
-    NULL
-  },
-  FALSE
-};
-
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_to_revision =
-{
-  {
-    -1,
-    (gchar *) "to_revision",
-    (gchar *) "s",
-    NULL
-  },
-  FALSE
-};
-
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_branch =
-{
-  {
-    -1,
-    (gchar *) "branch",
+    (gchar *) "name",
     (gchar *) "s",
     NULL
   },
@@ -328,9 +306,7 @@ static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta
 
 static const _ExtendedGDBusArgInfo * const _ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_pointers[] =
 {
-  &_ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_from_revision,
-  &_ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_to_revision,
-  &_ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_branch,
+  &_ostree_fetch_service_method_info_fetch_delta_super_IN_ARG_name,
   NULL
 };
 
@@ -840,9 +816,7 @@ ostree_fetch_service_default_init (OstreeFetchServiceIface *iface)
    * OstreeFetchService::handle-fetch-delta-super:
    * @object: A #OstreeFetchService.
    * @invocation: A #GDBusMethodInvocation.
-   * @arg_from_revision: Argument passed by remote caller.
-   * @arg_to_revision: Argument passed by remote caller.
-   * @arg_branch: Argument passed by remote caller.
+   * @arg_name: Argument passed by remote caller.
    *
    * Signal emitted when a remote caller is invoking the <link linkend="gdbus-method-ostree-fetch-service.fetch_delta_super">fetch_delta_super()</link> D-Bus method.
    *
@@ -858,8 +832,8 @@ ostree_fetch_service_default_init (OstreeFetchServiceIface *iface)
     NULL,
     g_cclosure_marshal_generic,
     G_TYPE_BOOLEAN,
-    4,
-    G_TYPE_DBUS_METHOD_INVOCATION, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+    2,
+    G_TYPE_DBUS_METHOD_INVOCATION, G_TYPE_STRING);
 
   /**
    * OstreeFetchService::handle-fetch-ref:
@@ -1276,9 +1250,7 @@ _out:
 /**
  * ostree_fetch_service_call_fetch_delta_super:
  * @proxy: A #OstreeFetchServiceProxy.
- * @arg_from_revision: Argument to pass with the method invocation.
- * @arg_to_revision: Argument to pass with the method invocation.
- * @arg_branch: Argument to pass with the method invocation.
+ * @arg_name: Argument to pass with the method invocation.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
  * @callback: A #GAsyncReadyCallback to call when the request is satisfied or %NULL.
  * @user_data: User data to pass to @callback.
@@ -1292,19 +1264,15 @@ _out:
 void
 ostree_fetch_service_call_fetch_delta_super (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    const gchar *arg_branch,
+    const gchar *arg_name,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data)
 {
   g_dbus_proxy_call (G_DBUS_PROXY (proxy),
     "fetch_delta_super",
-    g_variant_new ("(sss)",
-                   arg_from_revision,
-                   arg_to_revision,
-                   arg_branch),
+    g_variant_new ("(s)",
+                   arg_name),
     G_DBUS_CALL_FLAGS_NONE,
     -1,
     cancellable,
@@ -1345,9 +1313,7 @@ _out:
 /**
  * ostree_fetch_service_call_fetch_delta_super_sync:
  * @proxy: A #OstreeFetchServiceProxy.
- * @arg_from_revision: Argument to pass with the method invocation.
- * @arg_to_revision: Argument to pass with the method invocation.
- * @arg_branch: Argument to pass with the method invocation.
+ * @arg_name: Argument to pass with the method invocation.
  * @out_result: (out): Return location for return parameter or %NULL to ignore.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
  * @error: Return location for error or %NULL.
@@ -1361,9 +1327,7 @@ _out:
 gboolean
 ostree_fetch_service_call_fetch_delta_super_sync (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    const gchar *arg_branch,
+    const gchar *arg_name,
     GVariant **out_result,
     GCancellable *cancellable,
     GError **error)
@@ -1371,10 +1335,8 @@ ostree_fetch_service_call_fetch_delta_super_sync (
   GVariant *_ret;
   _ret = g_dbus_proxy_call_sync (G_DBUS_PROXY (proxy),
     "fetch_delta_super",
-    g_variant_new ("(sss)",
-                   arg_from_revision,
-                   arg_to_revision,
-                   arg_branch),
+    g_variant_new ("(s)",
+                   arg_name),
     G_DBUS_CALL_FLAGS_NONE,
     -1,
     cancellable,

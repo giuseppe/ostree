@@ -13,9 +13,7 @@
       <arg name="temp_path" type="s" direction="out"/>
     </method>
     <method name="fetch_delta_super">
-      <arg name="from_revision" type="s" direction="in"/>
-      <arg name="to_revision" type="s" direction="in"/>
-      <arg name="branch" type="s" direction="in"/>
+      <arg name="name" type="s" direction="in"/>
       <arg name="result" type="ay" direction="out">
         <annotation name="org.gtk.GDBus.C.ForceGVariant" value="true"/>
       </arg>

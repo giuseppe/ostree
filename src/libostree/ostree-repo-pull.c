@@ -1580,9 +1580,9 @@ fetch_revision (FetchDeltaSuperBlockData *fetch_data,
 
   if (!pull_data->disable_static_deltas && (fetch_data->from_revision == NULL || g_strcmp0 (fetch_data->from_revision, fetch_data->to_revision) != 0))
     {
-      ostree_fetch_service_call_fetch_delta_super (pull_data->fetcher,
-                                        fetch_data->from_revision, fetch_data->to_revision, fetch_data->branch,
-                                        cancellable, delta_superblock_fetch_on_complete, fetch_data);
+      g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (fetch_data->from_revision, fetch_data->to_revision);
+      ostree_fetch_service_call_fetch_delta_super (pull_data->fetcher, delta_name,
+        cancellable, delta_superblock_fetch_on_complete, fetch_data);
       free_fetch_data = FALSE;
       pull_data->n_outstanding[FETCH_OTHER]++;
     }
@@ -2384,6 +2384,8 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   GSource *update_timeout = NULL;
   gsize i;
   glnx_unref_object GSubprocess *subprocess = NULL;
+  GLnxLockFile tmpdir_lock = GLNX_LOCK_FILE_INIT;
+  g_autofree char* tmpdir_name = NULL;
 
   g_autofree char **refs_to_fetch = NULL;
   OstreeRepoPullFlags flags = 0;
@@ -2479,7 +2481,6 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
         }
     }
 
-  pull_data->tmpdir_dfd = pull_data->repo->tmp_dir_fd;
   pull_data->static_delta_superblocks = g_ptr_array_new_with_free_func ((GDestroyNotify)g_variant_unref);
 
   {
@@ -2556,6 +2557,21 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     glnx_unref_object GSubprocessLauncher *launcher = NULL;
     int pair[2];
 
+    pull_data->fetch_tmpdir_dfd = -1;
+    /* We need a temporary directory only for delta parts and repository objects */
+    if (!pull_data->dry_run && !pull_data->fetch_only_summary)
+      {
+        if (!_ostree_repo_allocate_tmpdir (pull_data->repo->tmp_dir_fd,
+                                            OSTREE_REPO_TMPDIR_FETCHER,
+                                            &tmpdir_name,
+                                            &pull_data->fetch_tmpdir_dfd,
+                                            &tmpdir_lock,
+                                            NULL,
+                                            cancellable,
+                                            error))
+          goto out;
+      }
+
     if (socketpair (AF_UNIX, SOCK_STREAM, 0, pair) < 0)
       {
         g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
@@ -2581,7 +2597,14 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_NONE);
     // TODO: g_subprocess_launcher_set_child_setup (launcher, child_setup, NULL, NULL);
     g_subprocess_launcher_take_fd (launcher, pair[1], 3); // STDERR_FILENO + 1
-    subprocess = g_subprocess_launcher_spawn (launcher, error, "ostree-repo-pull","--socketfd","3", NULL);
+    if (pull_data->fetch_tmpdir_dfd >= 0)
+      {
+        g_subprocess_launcher_take_fd (launcher, pull_data->fetch_tmpdir_dfd, 4);
+        subprocess = g_subprocess_launcher_spawn (launcher, error,
+          "ostree-repo-pull","--socketfd","3","--tmpdirfd","4", NULL);
+      }
+    else
+      subprocess = g_subprocess_launcher_spawn (launcher, error, "ostree-repo-pull","--socketfd","3", NULL);
     if (subprocess == NULL)
       goto out;
   }
@@ -2724,6 +2747,11 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   g_clear_pointer (&pull_data->idle_src, (GDestroyNotify) g_source_destroy);
   g_clear_pointer (&pull_data->requested_refs_to_fetch, (GDestroyNotify) g_hash_table_unref);
   g_clear_pointer (&pull_data->commits_to_fetch, (GDestroyNotify) g_hash_table_unref);
+  /* Note: We don't remove the tmpdir here, because that would cause
+      us to not reuse it on resume. This happens because we use two
+      fetchers for each pull, so finalizing the first one would remove
+      all the files to be resumed from the previous second one */
+  glnx_release_lock_file (&tmpdir_lock);
   return ret;
 }
 

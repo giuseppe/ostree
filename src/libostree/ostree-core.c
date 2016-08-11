@@ -1487,36 +1487,6 @@ _ostree_header_gfile_info_new (mode_t mode, uid_t uid, gid_t gid)
   return ret;
 }
 
-/*
- * _ostree_get_relative_object_path:
- * @checksum: ASCII checksum string
- * @type: Object type
- * @compressed: Whether or not the repository object is compressed
- *
- * Returns: (transfer full): Relative path for a loose object
- */
-char *
-_ostree_get_relative_object_path (const char         *checksum,
-                                  OstreeObjectType    type,
-                                  gboolean            compressed)
-{
-  GString *path;
-
-  g_assert (strlen (checksum) == OSTREE_SHA256_STRING_LEN);
-
-  path = g_string_new ("objects/");
-
-  g_string_append_len (path, checksum, 2);
-  g_string_append_c (path, '/');
-  g_string_append (path, checksum + 2);
-  g_string_append_c (path, '.');
-  g_string_append (path, ostree_object_type_to_string (type));
-  if (!OSTREE_OBJECT_TYPE_IS_META (type) && compressed)
-    g_string_append (path, "z");
-
-  return g_string_free (path, FALSE);
-}
-
 char *
 _ostree_get_relative_static_delta_path (const char *from,
                                         const char *to,

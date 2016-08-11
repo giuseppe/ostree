@@ -41,9 +41,7 @@ struct _OstreeFetchServiceIface
   gboolean (*handle_fetch_delta_super) (
     OstreeFetchService *object,
     GDBusMethodInvocation *invocation,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    const gchar *arg_branch);
+    const gchar *arg_name);
 
   gboolean (*handle_fetch_object) (
     OstreeFetchService *object,
@@ -201,9 +199,7 @@ gboolean ostree_fetch_service_call_fetch_delta_part_sync (
 
 void ostree_fetch_service_call_fetch_delta_super (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    const gchar *arg_branch,
+    const gchar *arg_name,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data);
@@ -216,9 +212,7 @@ gboolean ostree_fetch_service_call_fetch_delta_super_finish (
 
 gboolean ostree_fetch_service_call_fetch_delta_super_sync (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    const gchar *arg_branch,
+    const gchar *arg_name,
     GVariant **out_result,
     GCancellable *cancellable,
     GError **error);

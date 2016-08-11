@@ -306,12 +306,9 @@ static gboolean handle_fetch_delta_part (
 static gboolean handle_fetch_delta_super (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *from_revision,
-  const gchar *to_revision,
-  const gchar *arg_branch,
+  const gchar *delta_name,
   OtFetchData *pull_data)
 {
-  g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (from_revision, to_revision);
   SoupURI *target_uri = suburi_new (pull_data->base_uri, delta_name, NULL);
   _ostree_fetcher_stream_uri_async (pull_data->fetcher,
                                     target_uri,
@@ -322,6 +319,36 @@ static gboolean handle_fetch_delta_super (
                                     mk_fetch_data (pull_data, invocation ));
   soup_uri_free (target_uri);
   return TRUE;
+}
+
+/*
+ * _ostree_get_relative_object_path:
+ * @checksum: ASCII checksum string
+ * @type: Object type
+ * @compressed: Whether or not the repository object is compressed
+ *
+ * Returns: (transfer full): Relative path for a loose object
+ */
+static char *
+_ostree_get_relative_object_path (const char         *checksum,
+                                  OstreeObjectType    type,
+                                  gboolean            compressed)
+{
+  GString *path;
+
+  g_assert (strlen (checksum) == OSTREE_SHA256_STRING_LEN);
+
+  path = g_string_new ("objects/");
+
+  g_string_append_len (path, checksum, 2);
+  g_string_append_c (path, '/');
+  g_string_append (path, checksum + 2);
+  g_string_append_c (path, '.');
+  g_string_append (path, ostree_object_type_to_string (type));
+  if (!OSTREE_OBJECT_TYPE_IS_META (type) && compressed)
+    g_string_append (path, "z");
+
+  return g_string_free (path, FALSE);
 }
 
 static gboolean handle_fetch_object (
@@ -517,12 +544,12 @@ main (int argc, char **argv)
 {
   GError *local_error = NULL;
   GError **error = &local_error;
-  int ret;
   OstreeFetchService *interface = ostree_fetch_service_skeleton_new ();
   OtFetchData pull_data_real = {0, };
   OtFetchData* pull_data = &pull_data_real;
 
   static int socket_fd = -1;
+  static int tmpdir_dfd = -1;
   glnx_unref_object GSocket *socket = NULL;
   glnx_unref_object GSocketConnection *stream = NULL;
   g_autofree char* guid = g_dbus_generate_guid ();
@@ -530,7 +557,8 @@ main (int argc, char **argv)
 
   GOptionContext  *context = NULL;
   static GOptionEntry entries []   = {
-    { "socketfd", 0, 0, G_OPTION_ARG_INT, &socket_fd, "D-Bus Socket File Descriptor", "FD" },
+    { "socketfd", 0, 0, G_OPTION_ARG_INT, &socket_fd, "D-Bus Socket", "FD" },
+    { "tmpdirfd", 0, 0, G_OPTION_ARG_INT, &tmpdir_dfd, "Temporary Directory", "FD" },
     { NULL }
   };
 
@@ -543,7 +571,7 @@ main (int argc, char **argv)
   g_option_context_free (context);
 
   /* Set up interface */
-
+  pull_data->tmp_dir_fd = tmpdir_dfd;
   g_signal_connect (interface, "handle-fetch-config", G_CALLBACK (handle_fetch_config), pull_data);
   g_signal_connect (interface, "handle-fetch-delta-part", G_CALLBACK (handle_fetch_delta_part), pull_data);
   g_signal_connect (interface, "handle-fetch-delta-super", G_CALLBACK (handle_fetch_delta_super), pull_data);
@@ -595,7 +623,8 @@ main (int argc, char **argv)
         }
       g_printerr ("%serror: %s%s\n", prefix, suffix, local_error->message);
       g_error_free (local_error);
+      return 1;
     }
-
-  return ret;
+  else
+    return 0;
 }
