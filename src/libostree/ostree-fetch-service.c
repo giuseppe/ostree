@@ -234,34 +234,12 @@ static const _ExtendedGDBusMethodInfo _ostree_fetch_service_method_info_fetch_ob
   FALSE
 };
 
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_from_revision =
+static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_path =
 {
   {
     -1,
-    (gchar *) "from_revision",
+    (gchar *) "path",
     (gchar *) "s",
-    NULL
-  },
-  FALSE
-};
-
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_to_revision =
-{
-  {
-    -1,
-    (gchar *) "to_revision",
-    (gchar *) "s",
-    NULL
-  },
-  FALSE
-};
-
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_index =
-{
-  {
-    -1,
-    (gchar *) "index",
-    (gchar *) "i",
     NULL
   },
   FALSE
@@ -280,9 +258,7 @@ static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta
 
 static const _ExtendedGDBusArgInfo * const _ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_pointers[] =
 {
-  &_ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_from_revision,
-  &_ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_to_revision,
-  &_ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_index,
+  &_ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_path,
   &_ostree_fetch_service_method_info_fetch_delta_part_IN_ARG_max_size,
   NULL
 };
@@ -358,20 +334,20 @@ static const _ExtendedGDBusArgInfo * const _ostree_fetch_service_method_info_fet
   NULL
 };
 
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_OUT_ARG_temp_path =
+static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_delta_super_OUT_ARG_result =
 {
   {
     -1,
-    (gchar *) "temp_path",
-    (gchar *) "s",
+    (gchar *) "result",
+    (gchar *) "ay",
     NULL
   },
-  FALSE
+  TRUE
 };
 
 static const _ExtendedGDBusArgInfo * const _ostree_fetch_service_method_info_fetch_delta_super_OUT_ARG_pointers[] =
 {
-  &_ostree_fetch_service_method_info_fetch_delta_super_OUT_ARG_temp_path,
+  &_ostree_fetch_service_method_info_fetch_delta_super_OUT_ARG_result,
   NULL
 };
 
@@ -840,9 +816,7 @@ ostree_fetch_service_default_init (OstreeFetchServiceIface *iface)
    * OstreeFetchService::handle-fetch-delta-part:
    * @object: A #OstreeFetchService.
    * @invocation: A #GDBusMethodInvocation.
-   * @arg_from_revision: Argument passed by remote caller.
-   * @arg_to_revision: Argument passed by remote caller.
-   * @arg_index: Argument passed by remote caller.
+   * @arg_path: Argument passed by remote caller.
    * @arg_max_size: Argument passed by remote caller.
    *
    * Signal emitted when a remote caller is invoking the <link linkend="gdbus-method-ostree-fetch-service.fetch_delta_part">fetch_delta_part()</link> D-Bus method.
@@ -859,8 +833,8 @@ ostree_fetch_service_default_init (OstreeFetchServiceIface *iface)
     NULL,
     g_cclosure_marshal_generic,
     G_TYPE_BOOLEAN,
-    5,
-    G_TYPE_DBUS_METHOD_INVOCATION, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_UINT64);
+    3,
+    G_TYPE_DBUS_METHOD_INVOCATION, G_TYPE_STRING, G_TYPE_UINT64);
 
   /**
    * OstreeFetchService::handle-fetch-delta-super:
@@ -1192,9 +1166,7 @@ _out:
 /**
  * ostree_fetch_service_call_fetch_delta_part:
  * @proxy: A #OstreeFetchServiceProxy.
- * @arg_from_revision: Argument to pass with the method invocation.
- * @arg_to_revision: Argument to pass with the method invocation.
- * @arg_index: Argument to pass with the method invocation.
+ * @arg_path: Argument to pass with the method invocation.
  * @arg_max_size: Argument to pass with the method invocation.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
  * @callback: A #GAsyncReadyCallback to call when the request is satisfied or %NULL.
@@ -1209,9 +1181,7 @@ _out:
 void
 ostree_fetch_service_call_fetch_delta_part (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    gint arg_index,
+    const gchar *arg_path,
     guint64 arg_max_size,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
@@ -1219,10 +1189,8 @@ ostree_fetch_service_call_fetch_delta_part (
 {
   g_dbus_proxy_call (G_DBUS_PROXY (proxy),
     "fetch_delta_part",
-    g_variant_new ("(ssit)",
-                   arg_from_revision,
-                   arg_to_revision,
-                   arg_index,
+    g_variant_new ("(st)",
+                   arg_path,
                    arg_max_size),
     G_DBUS_CALL_FLAGS_NONE,
     -1,
@@ -1264,9 +1232,7 @@ _out:
 /**
  * ostree_fetch_service_call_fetch_delta_part_sync:
  * @proxy: A #OstreeFetchServiceProxy.
- * @arg_from_revision: Argument to pass with the method invocation.
- * @arg_to_revision: Argument to pass with the method invocation.
- * @arg_index: Argument to pass with the method invocation.
+ * @arg_path: Argument to pass with the method invocation.
  * @arg_max_size: Argument to pass with the method invocation.
  * @out_temp_path: (out): Return location for return parameter or %NULL to ignore.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
@@ -1281,9 +1247,7 @@ _out:
 gboolean
 ostree_fetch_service_call_fetch_delta_part_sync (
     OstreeFetchService *proxy,
-    const gchar *arg_from_revision,
-    const gchar *arg_to_revision,
-    gint arg_index,
+    const gchar *arg_path,
     guint64 arg_max_size,
     gchar **out_temp_path,
     GCancellable *cancellable,
@@ -1292,10 +1256,8 @@ ostree_fetch_service_call_fetch_delta_part_sync (
   GVariant *_ret;
   _ret = g_dbus_proxy_call_sync (G_DBUS_PROXY (proxy),
     "fetch_delta_part",
-    g_variant_new ("(ssit)",
-                   arg_from_revision,
-                   arg_to_revision,
-                   arg_index,
+    g_variant_new ("(st)",
+                   arg_path,
                    arg_max_size),
     G_DBUS_CALL_FLAGS_NONE,
     -1,
@@ -1353,7 +1315,7 @@ ostree_fetch_service_call_fetch_delta_super (
 /**
  * ostree_fetch_service_call_fetch_delta_super_finish:
  * @proxy: A #OstreeFetchServiceProxy.
- * @out_temp_path: (out): Return location for return parameter or %NULL to ignore.
+ * @out_result: (out): Return location for return parameter or %NULL to ignore.
  * @res: The #GAsyncResult obtained from the #GAsyncReadyCallback passed to ostree_fetch_service_call_fetch_delta_super().
  * @error: Return location for error or %NULL.
  *
@@ -1364,7 +1326,7 @@ ostree_fetch_service_call_fetch_delta_super (
 gboolean
 ostree_fetch_service_call_fetch_delta_super_finish (
     OstreeFetchService *proxy,
-    gchar **out_temp_path,
+    GVariant **out_result,
     GAsyncResult *res,
     GError **error)
 {
@@ -1373,8 +1335,8 @@ ostree_fetch_service_call_fetch_delta_super_finish (
   if (_ret == NULL)
     goto _out;
   g_variant_get (_ret,
-                 "(s)",
-                 out_temp_path);
+                 "(@ay)",
+                 out_result);
   g_variant_unref (_ret);
 _out:
   return _ret != NULL;
@@ -1386,7 +1348,7 @@ _out:
  * @arg_from_revision: Argument to pass with the method invocation.
  * @arg_to_revision: Argument to pass with the method invocation.
  * @arg_branch: Argument to pass with the method invocation.
- * @out_temp_path: (out): Return location for return parameter or %NULL to ignore.
+ * @out_result: (out): Return location for return parameter or %NULL to ignore.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
  * @error: Return location for error or %NULL.
  *
@@ -1402,7 +1364,7 @@ ostree_fetch_service_call_fetch_delta_super_sync (
     const gchar *arg_from_revision,
     const gchar *arg_to_revision,
     const gchar *arg_branch,
-    gchar **out_temp_path,
+    GVariant **out_result,
     GCancellable *cancellable,
     GError **error)
 {
@@ -1420,8 +1382,8 @@ ostree_fetch_service_call_fetch_delta_super_sync (
   if (_ret == NULL)
     goto _out;
   g_variant_get (_ret,
-                 "(s)",
-                 out_temp_path);
+                 "(@ay)",
+                 out_result);
   g_variant_unref (_ret);
 _out:
   return _ret != NULL;
@@ -2293,7 +2255,7 @@ ostree_fetch_service_complete_fetch_delta_part (
  * ostree_fetch_service_complete_fetch_delta_super:
  * @object: A #OstreeFetchService.
  * @invocation: (transfer full): A #GDBusMethodInvocation.
- * @temp_path: Parameter to return.
+ * @result: Parameter to return.
  *
  * Helper function used in service implementations to finish handling invocations of the <link linkend="gdbus-method-ostree-fetch-service.fetch_delta_super">fetch_delta_super()</link> D-Bus method. If you instead want to finish handling an invocation by returning an error, use g_dbus_method_invocation_return_error() or similar.
  *
@@ -2303,11 +2265,11 @@ void
 ostree_fetch_service_complete_fetch_delta_super (
     OstreeFetchService *object,
     GDBusMethodInvocation *invocation,
-    const gchar *temp_path)
+    GVariant *result)
 {
   g_dbus_method_invocation_return_value (invocation,
-    g_variant_new ("(s)",
-                   temp_path));
+    g_variant_new ("(@ay)",
+                   result));
 }
 
 /**

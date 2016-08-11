@@ -318,4 +318,9 @@ gboolean
 _ostree_repo_update_mtime (OstreeRepo        *self,
                            GError           **error);
 
+gboolean
+_ostree_repo_mode_to_string (OstreeRepoMode   mode,
+                             const char     **out_mode,
+                             GError         **error);
+
 G_END_DECLS

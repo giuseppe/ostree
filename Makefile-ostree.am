@@ -141,6 +141,7 @@ BUILT_SOURCES += $(ENUM_GENERATED)
 
 ostree_repo_pull_SOURCES = \
 	$(ENUM_GENERATED) \
+	$(libostree_1_la_SOURCES) \
 	src/libostree/ostree-repo-pull-soup.c \
 	src/libostree/ostree-fetcher.h \
 	src/libostree/ostree-fetcher.c \
@@ -153,7 +154,7 @@ ostree_repo_pull_SOURCES += \
 	src/libostree/ostree-tls-cert-interaction.h \
 	$(NULL)
 endif
-ostree_repo_pull_CFLAGS = $(ostree_bin_shared_cflags) $(OT_INTERNAL_GIO_UNIX_CFLAGS) $(OT_INTERNAL_SOUP_CFLAGS) -I$(srcdir)/libglnx
-ostree_repo_pull_LDADD = $(ostree_bin_shared_ldadd) $(OT_INTERNAL_GIO_UNIX_LIBS) $(OT_INTERNAL_SOUP_LIBS) $(LIBSYSTEMD_LIBS)
+ostree_repo_pull_CFLAGS = $(ostree_CFLAGS)
+ostree_repo_pull_LDADD = libglnx.la libbsdiff.la libotutil.la libostree-kernel-args.la $(OT_INTERNAL_GIO_UNIX_LIBS) $(OT_INTERNAL_SOUP_LIBS) $(LIBSYSTEMD_LIBS)
 endif
 

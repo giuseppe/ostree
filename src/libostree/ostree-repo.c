@@ -1773,10 +1773,10 @@ ostree_repo_remote_fetch_summary (OstreeRepo    *self,
                                                         error);
 }
 
-static gboolean
-ostree_repo_mode_to_string (OstreeRepoMode   mode,
-                            const char     **out_mode,
-                            GError         **error)
+gboolean
+_ostree_repo_mode_to_string (OstreeRepoMode   mode,
+                             const char     **out_mode,
+                             GError         **error)
 {
   gboolean ret = FALSE;
   const char *ret_mode;
@@ -1857,7 +1857,7 @@ ostree_repo_create (OstreeRepo     *self,
   g_autoptr(GFile) grandchild = NULL;
   const char *mode_str;
 
-  if (!ostree_repo_mode_to_string (mode, &mode_str, error))
+  if (!_ostree_repo_mode_to_string (mode, &mode_str, error))
     goto out;
 
   if (mkdir (gs_file_get_path_cached (self->repodir), 0755) != 0)

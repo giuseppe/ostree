@@ -26,36 +26,47 @@
 #include "ostree.h"
 #include "otutil.h"
 
-#ifdef HAVE_LIBSOUP
-
 #include "ostree-core-private.h"
 #include "ostree-repo-private.h"
 #include "ostree-repo-static-delta-private.h"
 #include "ostree-metalink.h"
+#include "ostree-fetch-service.h"
+
 #include "ot-fs-utils.h"
 
 #include <gio/gunixinputstream.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <locale.h>
 
 #define OSTREE_REPO_PULL_CONTENT_PRIORITY  (OSTREE_FETCHER_DEFAULT_PRIORITY)
 #define OSTREE_REPO_PULL_METADATA_PRIORITY (OSTREE_REPO_PULL_CONTENT_PRIORITY - 100)
 
 typedef struct {
-  OstreeRepo   *repo;
-  OstreeRepoPullFlags flags;
-  char         *remote_name;
-
+  OstreeRepo    *repo;
   OstreeFetcher *fetcher;
-  SoupURI          *base_uri;
-  GMainContext    *main_context;
-  GCancellable *cancellable;
-
-  GBytes           *summary_data;
-} OtPullData;
+  SoupURI       *base_uri;
+  GMainContext  *main_context;
+  GCancellable  *cancellable;
+  GBytes        *summary_data;
+  int            tmp_dir_fd;
+} OtFetchData;
 
 typedef struct {
-  OstreeFetchService *object;
+  OtFetchData *pull_data;
   GDBusMethodInvocation *invocation;
 } FetchDBusData;
+
+static FetchDBusData* mk_fetch_data ( OtFetchData *pull_data, GDBusMethodInvocation *invocation )
+{
+  FetchDBusData* data = g_new0 (FetchDBusData, 1);
+  data->pull_data = pull_data;
+  data->invocation = invocation;
+  return data;
+}
+
+
 
 static SoupURI *
 suburi_new (SoupURI   *base,
@@ -95,14 +106,6 @@ suburi_new (SoupURI   *base,
   return ret;
 }
 
-gboolean handle_progress (
-  OstreeFetchService *object,
-  GDBusMethodInvocation *invocation)
-{
-  guint64 bytes_transferred = _ostree_fetcher_bytes_transferred (pull_data->fetcher);
-  ostree_async_progress_set_uint64 (pull_data->progress, "bytes-transferred", bytes_transferred);
-}
-
 static void
 fetch_file_on_complete (GObject        *object,
                         GAsyncResult   *result,
@@ -110,7 +113,8 @@ fetch_file_on_complete (GObject        *object,
 {
   OstreeFetcher *fetcher = (OstreeFetcher *)object;
   GError *local_error = NULL;
-  GDBusMethodInvocation *invocation = user_data;
+  g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
+  GDBusMethodInvocation *invocation = fetch_data->invocation;
   g_autofree char *temp_path =  _ostree_fetcher_request_uri_with_partial_finish (fetcher, result, &local_error);
   if (local_error)
     g_dbus_method_invocation_return_gerror (invocation, local_error);
@@ -126,11 +130,23 @@ fetch_bytes_on_complete (GObject        *object,
   OstreeFetcher *fetcher = (OstreeFetcher *)object;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GDBusMethodInvocation *invocation = user_data;
+  g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
+  GDBusMethodInvocation *invocation = fetch_data->invocation;
+  OtFetchData *pull_data = fetch_data->pull_data;
+
+
   GBytes* bytes_data = NULL;
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, FALSE, TRUE, &bytes_data, pull_data->cancellable, error))
-    g_dbus_method_invocation_return_gerror (invocation, local_error);
+    {
+      g_dbus_method_invocation_return_gerror (invocation, local_error);
+      return;
+    }
+
+  if (!bytes_data)
+    {
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("ay", NULL));
+    }
   else
     g_dbus_method_invocation_return_value (invocation, ot_gvariant_new_ay_bytes (bytes_data));
 }
@@ -144,7 +160,11 @@ ref_fetch_on_complete (GObject        *object,
   OstreeFetcher *fetcher = (OstreeFetcher *)object;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GDBusMethodInvocation *invocation = user_data;
+  g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
+  GDBusMethodInvocation *invocation = fetch_data->invocation;
+  OtFetchData *pull_data = fetch_data->pull_data;
+
+
   GBytes* buf = NULL;
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &buf, pull_data->cancellable, error))
@@ -167,7 +187,11 @@ config_fetch_on_complete (GObject        *object,
   OstreeFetcher *fetcher = (OstreeFetcher *)object;
   GError *local_error = NULL;
   GError **error = &local_error;
-  GDBusMethodInvocation *invocation = user_data;
+  g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
+  GDBusMethodInvocation *invocation = fetch_data->invocation;
+  OtFetchData *pull_data = fetch_data->pull_data;
+
+
   GBytes* bytes = NULL;
 
   g_autofree char *contents = NULL;
@@ -175,7 +199,7 @@ config_fetch_on_complete (GObject        *object,
   g_autoptr(GKeyFile) remote_config = g_key_file_new ();
   g_autofree char *remote_mode_str = NULL;
   guint remote_mode;
-  gboolean has_tombstone_comits;
+  gboolean has_tombstone_commits;
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &bytes, pull_data->cancellable, error))
     goto out;
@@ -201,34 +225,74 @@ config_fetch_on_complete (GObject        *object,
     g_dbus_method_invocation_return_gerror (invocation, local_error);
   else
     g_dbus_method_invocation_return_value (invocation,
-      g_variant_new ("(ub)", remote_mode, has_tombstone_comits));
+      g_variant_new ("(ub)", remote_mode, has_tombstone_commits));
 }
 
-gboolean handle_fetch_config (
+static void
+metalink_fetch_on_complete (GObject        *object,
+                            GAsyncResult   *result,
+                            gpointer        user_data)
+{
+  GError *local_error = NULL;
+  GError **error = &local_error;
+  g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
+  GDBusMethodInvocation *invocation = fetch_data->invocation;
+  OtFetchData *pull_data = fetch_data->pull_data;
+
+  FetchMetalinkResult* out = _ostree_metalink_request_finish (object, result, error);
+
+  if (local_error != NULL)
+    goto out;
+
+  {
+    g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (out->target_uri));
+    pull_data->base_uri = soup_uri_copy (out->target_uri);
+    soup_uri_set_path (pull_data->base_uri, repo_base);
+  }
+
+  pull_data->summary_data = out->data;
+
+ out:
+  if (local_error)
+    g_dbus_method_invocation_return_gerror (invocation, local_error);
+  else
+    g_dbus_method_invocation_return_value (invocation,
+      g_variant_new ("()"));
+}
+
+static gboolean handle_progress (
   OstreeFetchService *object,
-  GDBusMethodInvocation *invocation)
+  GDBusMethodInvocation *invocation,
+  OtFetchData *pull_data)
+{
+  ostree_fetch_service_complete_progress ( object, invocation, _ostree_fetcher_bytes_transferred (pull_data->fetcher) );
+  return TRUE;
+}
+
+static gboolean handle_fetch_config (
+  OstreeFetchService *object,
+  GDBusMethodInvocation *invocation,
+  OtFetchData *pull_data)
 {
   SoupURI *uri = suburi_new (pull_data->base_uri, "config", NULL);
   _ostree_fetcher_stream_uri_async (pull_data->fetcher,
                                     uri,
                                     OSTREE_MAX_METADATA_SIZE,
                                     OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
+                                    pull_data->cancellable,
                                     config_fetch_on_complete,
                                     pull_data);
   soup_uri_free (uri);
   return TRUE;
 }
 
-gboolean handle_fetch_delta_part (
+static gboolean handle_fetch_delta_part (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *arg_from_revision,
-  const gchar *arg_to_revision,
-  const gchar *arg_branch,
-  gint arg_index)
+  const gchar *deltapart_path,
+  guint64 size,
+  OtFetchData *pull_data)
 {
-  g_autofree char *deltapart_path = _ostree_get_relative_static_delta_part_path (from_revision, to_revision, i);
   SoupURI *target_uri = suburi_new (pull_data->base_uri, deltapart_path, NULL);
   _ostree_fetcher_request_uri_with_partial_async (pull_data->fetcher, target_uri, size,
                                                   OSTREE_FETCHER_DEFAULT_PRIORITY,
@@ -239,35 +303,37 @@ gboolean handle_fetch_delta_part (
   return TRUE;
 }
 
-gboolean handle_fetch_delta_super (
+static gboolean handle_fetch_delta_super (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *arg_from_revision,
-  const gchar *arg_to_revision,
-  const gchar *arg_branch)
+  const gchar *from_revision,
+  const gchar *to_revision,
+  const gchar *arg_branch,
+  OtFetchData *pull_data)
 {
-  OtPullData *pull_data = fetch_data->pull_data;
   g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (from_revision, to_revision);
   SoupURI *target_uri = suburi_new (pull_data->base_uri, delta_name, NULL);
   _ostree_fetcher_stream_uri_async (pull_data->fetcher,
                                     target_uri,
                                     OSTREE_MAX_METADATA_SIZE,
                                     OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
+                                    pull_data->cancellable,
                                     fetch_file_on_complete,
-                                    fetch_data);
+                                    mk_fetch_data (pull_data, invocation ));
   soup_uri_free (target_uri);
   return TRUE;
 }
 
-gboolean handle_fetch_object (
+static gboolean handle_fetch_object (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
   guint arg_objtype,
-  const gchar *arg_checksum)
+  const gchar *checksum,
+  guint64 expected_max_size,
+  OtFetchData *pull_data)
 {
-  gboolean is_meta = OSTREE_OBJECT_TYPE_IS_META (objtype);
   OstreeObjectType objtype = arg_objtype;
+  gboolean is_meta = OSTREE_OBJECT_TYPE_IS_META (objtype);
   g_autofree char *objpath = NULL;
   SoupURI *obj_uri = NULL;
 
@@ -281,89 +347,68 @@ gboolean handle_fetch_object (
                                                   is_meta ? OSTREE_REPO_PULL_METADATA_PRIORITY
                                                           : OSTREE_REPO_PULL_CONTENT_PRIORITY,
                                                   pull_data->cancellable,
-                                                  fetch_file_on_complete, invocation);
+                                                  fetch_file_on_complete, mk_fetch_data (pull_data, invocation ));
   soup_uri_free (obj_uri);
   return TRUE;
 }
 
-gboolean handle_fetch_ref (
+static gboolean handle_fetch_ref (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *arg_name)
+  const gchar *ref,
+  OtFetchData *pull_data)
 {
   SoupURI *target_uri = suburi_new (pull_data->base_uri, "refs", "heads", ref, NULL);
   _ostree_fetcher_stream_uri_async (pull_data->fetcher,
                                     target_uri,
                                     OSTREE_MAX_METADATA_SIZE,
                                     OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
-                                    revision_fetch_on_complete,
-                                    fetch_data);
+                                    pull_data->cancellable,
+                                    ref_fetch_on_complete,
+                                    mk_fetch_data (pull_data, invocation ));
   soup_uri_free (target_uri);
   return TRUE;
 }
 
-gboolean handle_fetch_summary (
-  OstreeFetchService *object,
-  GDBusMethodInvocation *invocation)
-{
-  SoupURI *uri = suburi_new (pull_data->base_uri, "summary", NULL);
-  pull_data->n_outstanding[FETCH_SUMMARY]++;
-  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
-                                    uri,
-                                    OSTREE_MAX_METADATA_SIZE,
-                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
-                                    summary_fetch_on_complete,
-                                    pull_data);
-  soup_uri_free (uri);
-  return TRUE;
-}
-
-gboolean handle_fetch_summary_sig (
-  OstreeFetchService *object,
-  GDBusMethodInvocation *invocation)
-{
-  SoupURI *uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
-  pull_data->n_outstanding[FETCH_SUMMARY_SIG]++;
-  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
-                                    uri,
-                                    OSTREE_MAX_METADATA_SIZE,
-                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
-                                    cancellable,
-                                    summary_sig_fetch_on_complete,
-                                    pull_data);
-  soup_uri_free (uri);
-  return TRUE;
-}
-
-static void
-metalink_fetch_on_complete (GObject        *object,
-                            GAsyncResult   *result,
-                            gpointer        user_data)
-{
-  GError *local_error = NULL;
-  GError **error = &local_error;
-  GDBusMethodInvocation *invocation = user_data;
-
-  FetchMetalinkResult* out = _ostree_metalink_request_finish (object, result, error);
-
-  {
-    g_autofree char *repo_base = g_path_get_dirname (soup_uri_get_path (out->target_uri));
-    pull_data->base_uri = soup_uri_copy (out->target_uri);
-    soup_uri_set_path (pull_data->base_uri, repo_base);
-  }
-
-  pull_data->summary_data = out->data;
-
-  if (local_error != NULL)
-      goto out;
-}
-
-gboolean handle_open_metalink (
+static gboolean handle_fetch_summary (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *arg_metalink_uri)
+  OtFetchData *pull_data)
+{
+  SoupURI *uri = suburi_new (pull_data->base_uri, "summary", NULL);
+  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                    uri,
+                                    OSTREE_MAX_METADATA_SIZE,
+                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                    pull_data->cancellable,
+                                    fetch_bytes_on_complete,
+                                    mk_fetch_data (pull_data, invocation ));
+  soup_uri_free (uri);
+  return TRUE;
+}
+
+static gboolean handle_fetch_summary_sig (
+  OstreeFetchService *object,
+  GDBusMethodInvocation *invocation,
+  OtFetchData *pull_data)
+{
+  SoupURI *uri = suburi_new (pull_data->base_uri, "summary.sig", NULL);
+  _ostree_fetcher_stream_uri_async (pull_data->fetcher,
+                                    uri,
+                                    OSTREE_MAX_METADATA_SIZE,
+                                    OSTREE_REPO_PULL_METADATA_PRIORITY,
+                                    pull_data->cancellable,
+                                    fetch_bytes_on_complete,
+                                    mk_fetch_data (pull_data, invocation ));
+  soup_uri_free (uri);
+  return TRUE;
+}
+
+static gboolean handle_open_metalink (
+  OstreeFetchService *object,
+  GDBusMethodInvocation *invocation,
+  const gchar *metalink_url_str,
+  OtFetchData *pull_data)
 {
   SoupURI *metalink_uri = soup_uri_new (metalink_url_str);
   if (!metalink_uri)
@@ -380,17 +425,18 @@ gboolean handle_open_metalink (
                                       OSTREE_MAX_METADATA_SIZE,
                                       OSTREE_REPO_PULL_METADATA_PRIORITY,
                                       metalink_fetch_on_complete,
-                                      pull_data,
-                                      cancellable);
+                                      mk_fetch_data (pull_data, invocation ),
+                                      pull_data->cancellable);
       soup_uri_free (metalink_uri);
     }
   return TRUE;
 }
 
-gboolean handle_open_url (
+static gboolean handle_open_url (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  const gchar *baseurl)
+  const gchar *baseurl,
+  OtFetchData *pull_data)
 {
   pull_data->base_uri = soup_uri_new (baseurl);
 
@@ -403,27 +449,27 @@ gboolean handle_open_url (
     {
       ostree_fetch_service_complete_open_url (object, invocation);
     }
+  return TRUE;
 }
 
-gboolean handle_new (
+static gboolean handle_new (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
-  gboolean arg_tls_permissive,
-  const gchar *arg_tls_client_cert_path,
-  const gchar *arg_tls_client_key_path,
-  const gchar *arg_tls_ca_path,
-  const gchar *arg_http_proxy)
+  gboolean tls_permissive,
+  const gchar *tls_client_cert_path,
+  const gchar *tls_client_key_path,
+  const gchar *tls_ca_path,
+  const gchar *http_proxy,
+  OtFetchData *pull_data)
 {
-  OstreeFetcher *fetcher = NULL;
+  GError *local_error = NULL;
+  GError **error = &local_error;
   OstreeFetcherConfigFlags fetcher_flags = 0;
-  gboolean success = FALSE;
-
-  g_return_val_if_fail (OSTREE_IS_REPO (self), FALSE);
 
   if (tls_permissive)
     fetcher_flags |= OSTREE_FETCHER_FLAGS_TLS_PERMISSIVE;
 
-  fetcher = _ostree_fetcher_new (self->tmp_dir_fd, fetcher_flags);
+  pull_data->fetcher = _ostree_fetcher_new (pull_data->tmp_dir_fd, fetcher_flags);
 
   if (tls_client_cert_path != NULL)
     {
@@ -437,7 +483,7 @@ gboolean handle_new (
       if (client_cert == NULL)
         goto out;
 
-      _ostree_fetcher_set_client_cert (fetcher, client_cert);
+      _ostree_fetcher_set_client_cert (pull_data->fetcher, client_cert);
     }
 
   if (tls_ca_path != NULL)
@@ -448,17 +494,20 @@ gboolean handle_new (
       if (db == NULL)
         goto out;
 
-      _ostree_fetcher_set_tls_database (fetcher, db);
+      _ostree_fetcher_set_tls_database (pull_data->fetcher, db);
     }
 
   if (http_proxy != NULL)
-    _ostree_fetcher_set_proxy (fetcher, http_proxy);
-
-  success = TRUE;
+    _ostree_fetcher_set_proxy (pull_data->fetcher, http_proxy);
 
 out:
-  if (!success)
-    g_clear_object (&fetcher);
+  if (local_error != NULL)
+    {
+      g_clear_object (&pull_data->fetcher);
+      g_dbus_method_invocation_return_gerror (invocation, local_error);
+    }
+  else
+    ostree_fetch_service_complete_new (object, invocation);
 
   return TRUE;
 }
@@ -470,6 +519,8 @@ main (int argc, char **argv)
   GError **error = &local_error;
   int ret;
   OstreeFetchService *interface = ostree_fetch_service_skeleton_new ();
+  OtFetchData pull_data_real = {0, };
+  OtFetchData* pull_data = &pull_data_real;
 
   static int socket_fd = -1;
   glnx_unref_object GSocket *socket = NULL;
@@ -486,20 +537,29 @@ main (int argc, char **argv)
   setlocale (LC_ALL, "");
   g_set_prgname (argv[0]);
 
-  context = g_option_context_new (_("OSTree Libsoup-based Fetcher"));
+  context = g_option_context_new ("OSTree Libsoup-based Fetcher");
   g_option_context_add_main_entries (context, entries, NULL);
   g_option_context_parse (context, &argc, &argv, NULL);
   g_option_context_free (context);
 
   /* Set up interface */
-  g_signal_connect (interface,
-                    "handle-hello-world",
-                    G_CALLBACK (on_handle_hello_world),
-                    some_user_data);
+
+  g_signal_connect (interface, "handle-fetch-config", G_CALLBACK (handle_fetch_config), pull_data);
+  g_signal_connect (interface, "handle-fetch-delta-part", G_CALLBACK (handle_fetch_delta_part), pull_data);
+  g_signal_connect (interface, "handle-fetch-delta-super", G_CALLBACK (handle_fetch_delta_super), pull_data);
+  g_signal_connect (interface, "handle-fetch-object", G_CALLBACK (handle_fetch_object), pull_data);
+  g_signal_connect (interface, "handle-fetch-ref", G_CALLBACK (handle_fetch_ref), pull_data);
+  g_signal_connect (interface, "handle-fetch-summary", G_CALLBACK (handle_fetch_summary), pull_data);
+  g_signal_connect (interface, "handle-fetch-summary-sig", G_CALLBACK (handle_fetch_summary_sig), pull_data);
+  g_signal_connect (interface, "handle-new", G_CALLBACK (handle_new), pull_data);
+  g_signal_connect (interface, "handle-open-metalink", G_CALLBACK (handle_open_metalink), pull_data);
+  g_signal_connect (interface, "handle-open-url", G_CALLBACK (handle_open_url), pull_data);
+  g_signal_connect (interface, "handle-progress", G_CALLBACK (handle_progress), pull_data);
 
   /* Build up the server connection */
-  socket = g_socket_new_from_fd (pair[1], &error);
-  g_assert_no_error (error);
+  socket = g_socket_new_from_fd (socket_fd, error);
+  if (local_error)
+    goto out;
 
   stream = g_socket_connection_factory_create_connection (socket);
   g_assert (stream != NULL);
@@ -516,11 +576,14 @@ main (int argc, char **argv)
                                          error))
     goto out;
 
-  loop = g_main_loop_new (NULL, FALSE);
-  g_main_loop_run (loop);
-  g_main_loop_unref (loop);
+  {
+    GMainLoop* loop = g_main_loop_new (NULL, FALSE);
+    g_main_loop_run (loop);
+    g_main_loop_unref (loop);
+  }
 
-  if (error != NULL)
+ out:
+  if (local_error != NULL)
     {
       int is_tty = isatty (1);
       const char *prefix = "";
@@ -530,8 +593,8 @@ main (int argc, char **argv)
           prefix = "\x1b[31m\x1b[1m"; /* red, bold */
           suffix = "\x1b[22m\x1b[0m"; /* bold off, color reset */
         }
-      g_printerr ("%serror: %s%s\n", prefix, suffix, error->message);
-      g_error_free (error);
+      g_printerr ("%serror: %s%s\n", prefix, suffix, local_error->message);
+      g_error_free (local_error);
     }
 
   return ret;

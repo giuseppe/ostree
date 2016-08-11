@@ -8,9 +8,7 @@
       <arg name="temp_path" type="s" direction="out"/>
     </method>
     <method name="fetch_delta_part">
-      <arg name="from_revision" type="s" direction="in"/>
-      <arg name="to_revision" type="s" direction="in"/>
-      <arg name="index" type="i" direction="in"/>
+      <arg name="path" type="s" direction="in"/>
       <arg name="max_size" type="t" direction="in"/>
       <arg name="temp_path" type="s" direction="out"/>
     </method>
@@ -18,7 +16,9 @@
       <arg name="from_revision" type="s" direction="in"/>
       <arg name="to_revision" type="s" direction="in"/>
       <arg name="branch" type="s" direction="in"/>
-      <arg name="temp_path" type="s" direction="out"/>
+      <arg name="result" type="ay" direction="out">
+        <annotation name="org.gtk.GDBus.C.ForceGVariant" value="true"/>
+      </arg>
     </method>
     <method name="fetch_ref">
       <arg name="name" type="s" direction="in"/>
