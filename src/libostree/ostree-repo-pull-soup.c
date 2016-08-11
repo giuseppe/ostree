@@ -113,11 +113,15 @@ fetch_file_on_complete (GObject        *object,
 {
   OstreeFetcher *fetcher = (OstreeFetcher *)object;
   GError *local_error = NULL;
+  GError **error = &local_error;
   g_autofree FetchDBusData* fetch_data = (FetchDBusData*)user_data;
   GDBusMethodInvocation *invocation = fetch_data->invocation;
-  g_autofree char *temp_path =  _ostree_fetcher_request_uri_with_partial_finish (fetcher, result, &local_error);
+  g_autofree char *temp_path =  _ostree_fetcher_request_uri_with_partial_finish (fetcher, result, error);
   if (local_error)
-    g_dbus_method_invocation_return_gerror (invocation, local_error);
+    {
+      g_prefix_error (error, "fetch_file: ");
+      g_dbus_method_invocation_return_gerror (invocation, local_error);
+    }
   else
     g_dbus_method_invocation_return_value (invocation, g_variant_new ("(s)", temp_path));
 }
@@ -139,6 +143,7 @@ fetch_bytes_on_complete (GObject        *object,
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, FALSE, TRUE, &bytes_data, pull_data->cancellable, error))
     {
+      g_prefix_error (error, "fetch_bytes: ");
       g_dbus_method_invocation_return_gerror (invocation, local_error);
       return;
     }
@@ -169,6 +174,7 @@ ref_fetch_on_complete (GObject        *object,
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &buf, pull_data->cancellable, error))
     {
+      g_prefix_error (error, "fetch_ref: ");
       g_dbus_method_invocation_return_gerror (invocation, local_error);
     }
   else
@@ -222,7 +228,10 @@ config_fetch_on_complete (GObject        *object,
 
  out:
   if (local_error)
-    g_dbus_method_invocation_return_gerror (invocation, local_error);
+    {
+      g_prefix_error (error, "fetch_config: ");
+      g_dbus_method_invocation_return_gerror (invocation, local_error);
+    }
   else
     g_dbus_method_invocation_return_value (invocation,
       g_variant_new ("(ub)", remote_mode, has_tombstone_commits));
@@ -254,7 +263,10 @@ metalink_fetch_on_complete (GObject        *object,
 
  out:
   if (local_error)
-    g_dbus_method_invocation_return_gerror (invocation, local_error);
+    {
+      g_prefix_error (error, "fetch_metalink: ");
+      g_dbus_method_invocation_return_gerror (invocation, local_error);
+    }
   else
     g_dbus_method_invocation_return_value (invocation,
       g_variant_new ("()"));
@@ -479,6 +491,11 @@ static gboolean handle_open_url (
   return TRUE;
 }
 
+static inline gboolean is_null_or_empty(const gchar* str)
+{
+  return str == NULL || str[0] == '\0';
+}
+
 static gboolean handle_new (
   OstreeFetchService *object,
   GDBusMethodInvocation *invocation,
@@ -498,11 +515,11 @@ static gboolean handle_new (
 
   pull_data->fetcher = _ostree_fetcher_new (pull_data->tmp_dir_fd, fetcher_flags);
 
-  if (tls_client_cert_path != NULL)
+  if (!is_null_or_empty (tls_client_cert_path))
     {
       g_autoptr(GTlsCertificate) client_cert = NULL;
 
-      g_assert (tls_client_key_path != NULL);
+      g_assert (!is_null_or_empty (tls_client_key_path));
 
       client_cert = g_tls_certificate_new_from_files (tls_client_cert_path,
                                                       tls_client_key_path,
@@ -513,7 +530,7 @@ static gboolean handle_new (
       _ostree_fetcher_set_client_cert (pull_data->fetcher, client_cert);
     }
 
-  if (tls_ca_path != NULL)
+  if (! is_null_or_empty (tls_ca_path))
     {
       g_autoptr(GTlsDatabase) db = NULL;
 
@@ -524,13 +541,14 @@ static gboolean handle_new (
       _ostree_fetcher_set_tls_database (pull_data->fetcher, db);
     }
 
-  if (http_proxy != NULL)
+  if (! is_null_or_empty (http_proxy))
     _ostree_fetcher_set_proxy (pull_data->fetcher, http_proxy);
 
 out:
   if (local_error != NULL)
     {
       g_clear_object (&pull_data->fetcher);
+      g_prefix_error (error, "handle_new: ");
       g_dbus_method_invocation_return_gerror (invocation, local_error);
     }
   else
@@ -604,6 +622,8 @@ main (int argc, char **argv)
                                          error))
     goto out;
 
+  g_debug ("starting child process main loop");
+
   {
     GMainLoop* loop = g_main_loop_new (NULL, FALSE);
     g_main_loop_run (loop);
@@ -621,7 +641,7 @@ main (int argc, char **argv)
           prefix = "\x1b[31m\x1b[1m"; /* red, bold */
           suffix = "\x1b[22m\x1b[0m"; /* bold off, color reset */
         }
-      g_printerr ("%serror: %s%s\n", prefix, suffix, local_error->message);
+      g_printerr ("%serror (soup): %s%s\n", prefix, suffix, local_error->message);
       g_error_free (local_error);
       return 1;
     }

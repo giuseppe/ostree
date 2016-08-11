@@ -31,7 +31,7 @@ cd ${test_tmpdir}
 rm -rf repo
 ${CMD_PREFIX} ostree --repo=repo init --mode=archive-z2
 ${CMD_PREFIX} ostree --repo=repo remote add --set=gpg-verify=false origin $(cat httpd-address)/ostree/gnomerepo
-${CMD_PREFIX} ostree --repo=repo pull --mirror origin main 2>err.txt
+${CMD_PREFIX} ostree --repo=repo pull --mirror origin main
 grep -q "concurrent requests 4" ${server_log}
 
 ${CMD_PREFIX} ostree --repo=repo fsck

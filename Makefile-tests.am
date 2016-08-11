@@ -30,7 +30,7 @@ EXTRA_DIST += \
 TESTS_ENVIRONMENT += OT_TESTS_DEBUG=1 \
 	GI_TYPELIB_PATH=$$(cd $(top_builddir) && pwd) \
 	LD_LIBRARY_PATH=$$(cd $(top_builddir)/.libs && pwd) \
-	PATH=$$(cd $(top_builddir)/tests && pwd):$${PATH} \
+	PATH=$$(cd $(top_builddir)/tests && pwd):$$(cd $(top_builddir) && pwd):$${PATH} \
 	$(NULL)
 
 uninstalled_test_data = tests/ostree-symlink-stamp tests/ostree-prepare-root-symlink-stamp \

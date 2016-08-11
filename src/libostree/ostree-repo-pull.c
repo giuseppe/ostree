@@ -1581,10 +1581,10 @@ fetch_revision (FetchDeltaSuperBlockData *fetch_data,
   if (!pull_data->disable_static_deltas && (fetch_data->from_revision == NULL || g_strcmp0 (fetch_data->from_revision, fetch_data->to_revision) != 0))
     {
       g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (fetch_data->from_revision, fetch_data->to_revision);
+      pull_data->n_outstanding[FETCH_OTHER]++;
       ostree_fetch_service_call_fetch_delta_super (pull_data->fetcher, delta_name,
         cancellable, delta_superblock_fetch_on_complete, fetch_data);
       free_fetch_data = FALSE;
-      pull_data->n_outstanding[FETCH_OTHER]++;
     }
   else
     {
@@ -2258,14 +2258,18 @@ on_client_connection (GObject        *object,
   g_autofree char *metalink_url_str = NULL;
   GDBusConnection* connection = g_dbus_connection_new_finish (result, error);
   OstreeFetchService * fetcher = ostree_fetch_service_proxy_new_sync (connection,
-    G_DBUS_PROXY_FLAGS_NONE, "ostree.fetch.service", "/ostree/fetch", pull_data->cancellable, error);
+    G_DBUS_PROXY_FLAGS_NONE, NULL, "/ostree/fetch", pull_data->cancellable, error);
+
+  g_debug ("on_client_connection");
+
   if (fetcher == NULL)
     goto out;
 
-  g_dbus_proxy_set_default_timeout (G_DBUS_PROXY(fetcher), G_MAXINT);
+  g_dbus_proxy_set_default_timeout (G_DBUS_PROXY (fetcher), G_MAXINT);
   pull_data->fetcher = fetcher;
 
-  _ostree_repo_remote_new_fetcher (pull_data, pull_data->repo, pull_data->remote_name_or_baseurl, error);
+  if(!_ostree_repo_remote_new_fetcher (pull_data, pull_data->repo, pull_data->remote_name_or_baseurl, error))
+    goto out;
 
   /* At this point, all fields of pull_data are initialized besides:
    * - base_uri (filled in from metalink or ostree_repo_remote_get_url)
@@ -2301,11 +2305,11 @@ on_client_connection (GObject        *object,
           remote_repo_path = g_file_new_for_uri (baseurl);
           pull_data->remote_repo_local = ostree_repo_new (remote_repo_path);
           if (!ostree_repo_open (pull_data->remote_repo_local, pull_data->cancellable, error))
-            return;
+            goto out;
         }
       else
         {
-          pull_data->remote_name = pull_data->remote_name_or_baseurl;
+          pull_data->remote_name = g_strdup (pull_data->remote_name_or_baseurl);
           if (!ostree_repo_remote_get_gpg_verify (pull_data->repo, pull_data->remote_name,
                                                   &pull_data->gpg_verify, error))
             goto out;
@@ -2425,7 +2429,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     g_return_val_if_fail (dir_to_pull[0] == '/', FALSE);
   pull_data->dir = g_strdup (dir_to_pull);
 
-  pull_data->remote_name = g_strdup (remote_name_or_baseurl);
+  pull_data->remote_name_or_baseurl = g_strdup (remote_name_or_baseurl);
 
   g_return_val_if_fail (!(pull_data->disable_static_deltas && pull_data->require_static_deltas), FALSE);
   /* We only do dry runs with static deltas, because we don't really have any
@@ -2588,13 +2592,15 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     if(stream == NULL)
       goto out;
 
+    pull_data->n_outstanding[FETCH_OTHER]++;
     g_dbus_connection_new (G_IO_STREAM (stream), NULL,
                           G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
                           G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_ALLOW_ANONYMOUS,
                           NULL, cancellable, on_client_connection, pull_data);
 
     g_debug ("launching ostree-repo-pull subprocess");
-    launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_NONE);
+    launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDERR_MERGE);
+    g_subprocess_launcher_setenv (launcher, "G_MESSAGES_DEBUG", "all", TRUE);
     // TODO: g_subprocess_launcher_set_child_setup (launcher, child_setup, NULL, NULL);
     g_subprocess_launcher_take_fd (launcher, pair[1], 3); // STDERR_FILENO + 1
     if (pull_data->fetch_tmpdir_dfd >= 0)
@@ -2729,6 +2735,8 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   if (update_timeout)
     g_source_destroy (update_timeout);
   g_clear_object (&pull_data->fetcher);
+  if (subprocess)
+    g_subprocess_force_exit (subprocess);
   g_clear_object (&pull_data->remote_repo_local);
   g_free (pull_data->remote_name);
   g_free (pull_data->remote_name_or_baseurl);
