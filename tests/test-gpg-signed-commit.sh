@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/nix/store/b4xk5zs6w92xnzg851idlh2380401id1-bash-4.3-p42/bin/bash
 #
 # Copyright (C) 2013 Jeremy Whiting <jeremy.whiting@collabora.com>
 # Copyright (C) 2015 Red Hat, Inc.

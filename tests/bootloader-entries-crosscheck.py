@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/run/current-system/sw/bin/python
 #
 # Copyright (C) 2015 Red Hat
 #

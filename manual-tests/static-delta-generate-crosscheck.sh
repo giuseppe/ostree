@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/nix/store/b4xk5zs6w92xnzg851idlh2380401id1-bash-4.3-p42/bin/bash
 #
 # Generate multiple variants of static deltas in a repo, then use them
 # to upgrade in a test repository, verifying that fsck works.
