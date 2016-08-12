@@ -630,14 +630,6 @@ main (int argc, char **argv)
  out:
   if (local_error != NULL)
     {
-      int is_tty = isatty (1);
-      const char *prefix = "";
-      const char *suffix = "";
-      if (is_tty)
-        {
-          prefix = "\x1b[31m\x1b[1m"; /* red, bold */
-          suffix = "\x1b[22m\x1b[0m"; /* bold off, color reset */
-        }
       g_printerr ("%serror (soup): %s%s\n", prefix, suffix, local_error->message);
       g_error_free (local_error);
       return 1;
