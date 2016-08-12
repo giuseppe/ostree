@@ -458,11 +458,11 @@ static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_confi
   FALSE
 };
 
-static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_config_OUT_ARG_has_tombstone_comits =
+static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_config_OUT_ARG_has_tombstone_commits =
 {
   {
     -1,
-    (gchar *) "has_tombstone_comits",
+    (gchar *) "has_tombstone_commits",
     (gchar *) "b",
     NULL
   },
@@ -472,7 +472,7 @@ static const _ExtendedGDBusArgInfo _ostree_fetch_service_method_info_fetch_confi
 static const _ExtendedGDBusArgInfo * const _ostree_fetch_service_method_info_fetch_config_OUT_ARG_pointers[] =
 {
   &_ostree_fetch_service_method_info_fetch_config_OUT_ARG_remote_mode,
-  &_ostree_fetch_service_method_info_fetch_config_OUT_ARG_has_tombstone_comits,
+  &_ostree_fetch_service_method_info_fetch_config_OUT_ARG_has_tombstone_commits,
   NULL
 };
 
@@ -1685,7 +1685,7 @@ ostree_fetch_service_call_fetch_config (
  * ostree_fetch_service_call_fetch_config_finish:
  * @proxy: A #OstreeFetchServiceProxy.
  * @out_remote_mode: (out): Return location for return parameter or %NULL to ignore.
- * @out_has_tombstone_comits: (out): Return location for return parameter or %NULL to ignore.
+ * @out_has_tombstone_commits: (out): Return location for return parameter or %NULL to ignore.
  * @res: The #GAsyncResult obtained from the #GAsyncReadyCallback passed to ostree_fetch_service_call_fetch_config().
  * @error: Return location for error or %NULL.
  *
@@ -1697,7 +1697,7 @@ gboolean
 ostree_fetch_service_call_fetch_config_finish (
     OstreeFetchService *proxy,
     guint *out_remote_mode,
-    gboolean *out_has_tombstone_comits,
+    gboolean *out_has_tombstone_commits,
     GAsyncResult *res,
     GError **error)
 {
@@ -1708,7 +1708,7 @@ ostree_fetch_service_call_fetch_config_finish (
   g_variant_get (_ret,
                  "(ub)",
                  out_remote_mode,
-                 out_has_tombstone_comits);
+                 out_has_tombstone_commits);
   g_variant_unref (_ret);
 _out:
   return _ret != NULL;
@@ -1718,7 +1718,7 @@ _out:
  * ostree_fetch_service_call_fetch_config_sync:
  * @proxy: A #OstreeFetchServiceProxy.
  * @out_remote_mode: (out): Return location for return parameter or %NULL to ignore.
- * @out_has_tombstone_comits: (out): Return location for return parameter or %NULL to ignore.
+ * @out_has_tombstone_commits: (out): Return location for return parameter or %NULL to ignore.
  * @cancellable: (allow-none): A #GCancellable or %NULL.
  * @error: Return location for error or %NULL.
  *
@@ -1732,7 +1732,7 @@ gboolean
 ostree_fetch_service_call_fetch_config_sync (
     OstreeFetchService *proxy,
     guint *out_remote_mode,
-    gboolean *out_has_tombstone_comits,
+    gboolean *out_has_tombstone_commits,
     GCancellable *cancellable,
     GError **error)
 {
@@ -1749,7 +1749,7 @@ ostree_fetch_service_call_fetch_config_sync (
   g_variant_get (_ret,
                  "(ub)",
                  out_remote_mode,
-                 out_has_tombstone_comits);
+                 out_has_tombstone_commits);
   g_variant_unref (_ret);
 _out:
   return _ret != NULL;
@@ -2302,7 +2302,7 @@ ostree_fetch_service_complete_fetch_summary_sig (
  * @object: A #OstreeFetchService.
  * @invocation: (transfer full): A #GDBusMethodInvocation.
  * @remote_mode: Parameter to return.
- * @has_tombstone_comits: Parameter to return.
+ * @has_tombstone_commits: Parameter to return.
  *
  * Helper function used in service implementations to finish handling invocations of the <link linkend="gdbus-method-ostree-fetch-service.fetch_config">fetch_config()</link> D-Bus method. If you instead want to finish handling an invocation by returning an error, use g_dbus_method_invocation_return_error() or similar.
  *
@@ -2313,12 +2313,12 @@ ostree_fetch_service_complete_fetch_config (
     OstreeFetchService *object,
     GDBusMethodInvocation *invocation,
     guint remote_mode,
-    gboolean has_tombstone_comits)
+    gboolean has_tombstone_commits)
 {
   g_dbus_method_invocation_return_value (invocation,
     g_variant_new ("(ub)",
                    remote_mode,
-                   has_tombstone_comits));
+                   has_tombstone_commits));
 }
 
 /**

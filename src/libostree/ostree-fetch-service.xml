@@ -34,7 +34,7 @@
     </method>
     <method name="fetch_config">
       <arg name="remote_mode" type="u" direction="out"/>
-      <arg name="has_tombstone_comits" type="b" direction="out"/>
+      <arg name="has_tombstone_commits" type="b" direction="out"/>
     </method>
     <method name="open_url">
       <arg name="base_uri" type="s" direction="in"/>

@@ -129,7 +129,7 @@ void ostree_fetch_service_complete_fetch_config (
     OstreeFetchService *object,
     GDBusMethodInvocation *invocation,
     guint remote_mode,
-    gboolean has_tombstone_comits);
+    gboolean has_tombstone_commits);
 
 void ostree_fetch_service_complete_open_url (
     OstreeFetchService *object,
@@ -282,14 +282,14 @@ void ostree_fetch_service_call_fetch_config (
 gboolean ostree_fetch_service_call_fetch_config_finish (
     OstreeFetchService *proxy,
     guint *out_remote_mode,
-    gboolean *out_has_tombstone_comits,
+    gboolean *out_has_tombstone_commits,
     GAsyncResult *res,
     GError **error);
 
 gboolean ostree_fetch_service_call_fetch_config_sync (
     OstreeFetchService *proxy,
     guint *out_remote_mode,
-    gboolean *out_has_tombstone_comits,
+    gboolean *out_has_tombstone_commits,
     GCancellable *cancellable,
     GError **error);
 
