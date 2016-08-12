@@ -1863,7 +1863,7 @@ ostree_repo_create (OstreeRepo     *self,
           const char *mode_str;
           g_autoptr(GString) config_data = g_string_new (DEFAULT_CONFIG_CONTENTS);
 
-          if (!ostree_repo_mode_to_string (mode, &mode_str, error))
+          if (!_ostree_repo_mode_to_string (mode, &mode_str, error))
             return FALSE;
 
           g_string_append_printf (config_data, "mode=%s\n", mode_str);

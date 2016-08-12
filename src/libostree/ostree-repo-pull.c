@@ -1577,8 +1577,8 @@ fetch_revision (FetchDeltaSuperBlockData *fetch_data,
   /* Store actual resolved rev so we know which refs to update */
   g_hash_table_replace (pull_data->requested_refs_to_fetch, g_strdup (fetch_data->branch), g_strdup (fetch_data->to_revision));
 
-  if (!disable_static_deltas && !pull_data->is_mirror &&
-      (from_revision == NULL || g_strcmp0 (from_revision, to_revision) != 0))
+  if (!pull_data->disable_static_deltas && !pull_data->is_mirror &&
+      (fetch_data->from_revision == NULL || g_strcmp0 (fetch_data->from_revision, fetch_data->to_revision) != 0))
     {
       g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (fetch_data->from_revision, fetch_data->to_revision);
       pull_data->n_outstanding[FETCH_OTHER]++;
@@ -2496,8 +2496,8 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   /* For local pulls, default to disabling static deltas so that the
    * exact object files are copied.
    */
-  if (pull_data->remote_repo_local && !require_static_deltas)
-    disable_static_deltas = TRUE;
+  if (pull_data->remote_repo_local && !pull_data->require_static_deltas)
+    pull_data->disable_static_deltas = TRUE;
 
   pull_data->static_delta_superblocks = g_ptr_array_new_with_free_func ((GDestroyNotify)g_variant_unref);
 
