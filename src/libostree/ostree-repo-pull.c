@@ -303,7 +303,7 @@ update_progress (gpointer user_data)
       pull_data->dry_run_emitted_progress = TRUE;
       return G_SOURCE_REMOVE;
     }
-  else
+  else if (pull_data->fetcher) /* fetcher may not be initialized yet */
     {
       pull_data->n_outstanding[FETCH_OTHER]++;
       ostree_fetch_service_call_progress (pull_data->fetcher, pull_data->cancellable, update_progress_bytes, pull_data);
@@ -2601,12 +2601,18 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     g_debug ("launching ostree-repo-pull subprocess");
     launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDERR_MERGE);
     g_subprocess_launcher_setenv (launcher, "G_MESSAGES_DEBUG", "all", TRUE);
+    g_subprocess_launcher_setenv (launcher, "G_SLICE", "always-malloc", TRUE);
+    g_subprocess_launcher_setenv (launcher, "OSTREE_SUPPRESS_SYNCFS", "1", TRUE);
     // TODO: g_subprocess_launcher_set_child_setup (launcher, child_setup, NULL, NULL);
     g_subprocess_launcher_take_fd (launcher, pair[1], 3); // STDERR_FILENO + 1
     if (pull_data->fetch_tmpdir_dfd >= 0)
       {
         g_subprocess_launcher_take_fd (launcher, pull_data->fetch_tmpdir_dfd, 4);
         subprocess = g_subprocess_launcher_spawn (launcher, error,
+//           "valgrind","--leak-check=full","--num-callers=30",
+//           "--suppressions=/home/aerg/projects/gsoc/ostree/tests/glib.supp",
+//           "--suppressions=/home/aerg/projects/gsoc/ostree/tests/ostree.supp",
+//           "--log-file=valgrind.log",
           "ostree-repo-pull","--socketfd","3","--tmpdirfd","4", NULL);
       }
     else

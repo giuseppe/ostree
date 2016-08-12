@@ -47,7 +47,6 @@ typedef struct {
   OstreeRepo    *repo;
   OstreeFetcher *fetcher;
   SoupURI       *base_uri;
-  GMainContext  *main_context;
   GCancellable  *cancellable;
   GBytes        *summary_data;
   int            tmp_dir_fd;
@@ -204,8 +203,8 @@ config_fetch_on_complete (GObject        *object,
   gsize len;
   g_autoptr(GKeyFile) remote_config = g_key_file_new ();
   g_autofree char *remote_mode_str = NULL;
-  guint remote_mode;
-  gboolean has_tombstone_commits;
+  guint remote_mode = OSTREE_REPO_MODE_BARE;
+  gboolean has_tombstone_commits = FALSE;
 
   if (!_ostree_fetcher_stream_uri_finish (fetcher, result, TRUE, FALSE, &bytes, pull_data->cancellable, error))
     goto out;
@@ -572,6 +571,7 @@ main (int argc, char **argv)
   glnx_unref_object GSocketConnection *stream = NULL;
   g_autofree char* guid = g_dbus_generate_guid ();
   glnx_unref_object GDBusConnection* connection = NULL;
+  GMainLoop* loop = g_main_loop_new (NULL, FALSE);
 
   GOptionContext  *context = NULL;
   static GOptionEntry entries []   = {
@@ -622,13 +622,12 @@ main (int argc, char **argv)
                                          error))
     goto out;
 
-  g_debug ("starting child process main loop");
+  g_debug ("starting fetch process main loop");
 
-  {
-    GMainLoop* loop = g_main_loop_new (NULL, FALSE);
-    g_main_loop_run (loop);
-    g_main_loop_unref (loop);
-  }
+  g_main_loop_run (loop);
+  g_main_loop_unref (loop);
+
+  g_debug ("finished fetch process main loop");
 
  out:
   if (local_error != NULL)
