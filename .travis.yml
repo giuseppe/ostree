@@ -1,24 +1,16 @@
-# We're just using a "stubbed out" Travis right now so we can
-# use Homu <https://github.com/barosl/homu> to auto-squash
-# etc.
-#
-# In the future we'll hook up better tests.
 language: c
 dist: trusty
-addons:
-    apt:
-    packages:
-      - automake
-      - autotools-dev
+sudo: required
+
+env:
+  - ci_distro=ubuntu ci_suite=trusty
+  - ci_docker=debian:jessie ci_distro=debian ci_suite=jessie
+  - ci_docker=debian:unstable ci_distro=debian ci_suite=unstable
+  - ci_docker=ubuntu:xenial ci_distro=ubuntu ci_suite=xenial
+
 script:
-  - env NOCONFIGURE=1 ./autogen.sh
+  - tests/ci-install.sh
+  - ci_parallel=2 ci_sudo=yes tests/ci-build.sh
 
 notifications:
-  # This is Colin's personal Homu instance.  We will
-  # also work on productizing this in Project Atomic.
-  webhooks: http://escher.verbum.org:54856/travis
   email: false
-
-branches:
-  only:
-    - auto

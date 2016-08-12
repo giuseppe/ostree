@@ -159,7 +159,8 @@ pkgconfig_DATA += src/libostree/ostree-1.pc
 gpgreadme_DATA = src/libostree/README-gpg
 gpgreadmedir = $(pkgdatadir)/trusted.gpg.d
 EXTRA_DIST += src/libostree/README-gpg src/libostree/bupsplit.h \
-		src/libostree/ostree-deployment-private.h
+		src/libostree/ostree-deployment-private.h \
+		src/libostree/ostree-repo-deprecated.h
 
 install-mkdir-remotes-d-hook:
 	mkdir -p $(DESTDIR)$(sysconfdir)/ostree/remotes.d

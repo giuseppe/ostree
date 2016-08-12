@@ -88,6 +88,7 @@ dist_test_scripts = \
 	tests/test-prune.sh \
 	tests/test-refs.sh \
 	tests/test-demo-buildsystem.sh \
+	tests/test-switchroot.sh \
 	$(NULL)
 
 if BUILDOPT_FUSE
@@ -243,6 +244,7 @@ ALL_LOCAL_RULES += tests/libreaddir-rand.so
 CLEANFILES += tests/libreaddir-rand.so tests/ostree-symlink-stamp \
 		tests/ostree-prepare-root-symlink-stamp tests/ostree-remount-symlink-stamp \
 		tests/rofiles-fuse-symlink-stamp tests/ostree
+CLEANFILES += tests/ostree-prepare-root tests/ostree-remount tests/rofiles-fuse
 
 tests/%-symlink-stamp: % Makefile
 	$(AM_V_GEN) set -e; \

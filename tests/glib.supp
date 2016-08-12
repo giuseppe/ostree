@@ -16,6 +16,12 @@
    fun:g_type_register_static
 }
 {
+   g_type_register_dynamic
+   Memcheck:Leak
+   ...
+   fun:g_type_register_dynamic
+}
+{
    g_type_register_fundamental
    Memcheck:Leak
    ...
@@ -48,6 +54,12 @@
    Memcheck:Leak
    ...
    fun:g_type_add_interface_static
+}
+{
+   g_type_add_interface_dynamic
+   Memcheck:Leak
+   ...
+   fun:g_type_add_interface_dynamic
 }
 {
    g_param_spec_internal
@@ -389,6 +401,14 @@
    fun:g_task_start_task_thread
 }
 {
+   g_task_to_pool
+   Memcheck:Leak
+   ...
+   fun:g_thread_pool_start_thread
+   ...
+   fun:g_task_run_in_thread
+}
+{
    g_get_language_names
    Memcheck:Leak
    match-leak-kinds: definite
@@ -532,4 +552,11 @@
    Memcheck:Leak
    ...
    fun:glib_worker_main
+}
+{
+   glib_worker_2
+   Memcheck:Leak
+   ...
+   fun:g_thread_new
+   fun:g_get_worker_context
 }

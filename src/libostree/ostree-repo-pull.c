@@ -917,7 +917,7 @@ content_fetch_on_complete (GObject        *object,
       if (!have_object)
         {
           if (!_ostree_repo_commit_loose_final (pull_data->repo, checksum, OSTREE_OBJECT_TYPE_FILE,
-                                                pull_data->fetch_tmpdir_dfd, temp_path,
+                                                pull_data->fetch_tmpdir_dfd, -1, temp_path,
                                                 cancellable, error))
             goto out;
         }
@@ -1577,7 +1577,8 @@ fetch_revision (FetchDeltaSuperBlockData *fetch_data,
   /* Store actual resolved rev so we know which refs to update */
   g_hash_table_replace (pull_data->requested_refs_to_fetch, g_strdup (fetch_data->branch), g_strdup (fetch_data->to_revision));
 
-  if (!pull_data->disable_static_deltas && (fetch_data->from_revision == NULL || g_strcmp0 (fetch_data->from_revision, fetch_data->to_revision) != 0))
+  if (!disable_static_deltas && !pull_data->is_mirror &&
+      (from_revision == NULL || g_strcmp0 (from_revision, to_revision) != 0))
     {
       g_autofree char *delta_name = _ostree_get_relative_static_delta_superblock_path (fetch_data->from_revision, fetch_data->to_revision);
       pull_data->n_outstanding[FETCH_OTHER]++;
@@ -1854,16 +1855,24 @@ process_summary (OtPullData    *pull_data,
 
   if (pull_data->is_mirror && pull_data->summary_data)
     {
-      if (!ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary",
-                                        pull_data->summary_data, !pull_data->repo->disable_fsync,
-                                        cancellable, error))
+      GLnxFileReplaceFlags replaceflag =
+        pull_data->repo->disable_fsync ? GLNX_FILE_REPLACE_NODATASYNC : 0;
+      gsize len;
+      const guint8 *buf = g_bytes_get_data (pull_data->summary_data, &len);
+
+      if (!glnx_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary",
+                                          buf, len, replaceflag,
+                                          cancellable, error))
         goto out;
 
-      if (pull_data->summary_data_sig &&
-          !ot_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary.sig",
-                                        pull_data->summary_data_sig, !pull_data->repo->disable_fsync,
-                                        cancellable, error))
-        goto out;
+      if (pull_data->summary_data_sig)
+        {
+          buf = g_bytes_get_data (pull_data->summary_data_sig, &len);
+          if (!glnx_file_replace_contents_at (pull_data->repo->repo_dir_fd, "summary.sig",
+                                              buf, len, replaceflag,
+                                              cancellable, error))
+            goto out;
+        }
     }
 
   if (pull_data->summary)
@@ -2484,6 +2493,12 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
         }
     }
 
+  /* For local pulls, default to disabling static deltas so that the
+   * exact object files are copied.
+   */
+  if (pull_data->remote_repo_local && !require_static_deltas)
+    disable_static_deltas = TRUE;
+
   pull_data->static_delta_superblocks = g_ptr_array_new_with_free_func ((GDestroyNotify)g_variant_unref);
 
   {
@@ -2664,6 +2679,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
                                           ref, checksum);
         }
     }
+
 
   if (!ostree_repo_commit_transaction (pull_data->repo, NULL, cancellable, error))
     goto out;
