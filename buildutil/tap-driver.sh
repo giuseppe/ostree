@@ -1,4 +1,4 @@
-#!/nix/store/b4xk5zs6w92xnzg851idlh2380401id1-bash-4.3-p42/bin/sh
+#! /bin/sh
 # Copyright (C) 2011-2013 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify

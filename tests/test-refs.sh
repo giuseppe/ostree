@@ -1,4 +1,4 @@
-#!/nix/store/b4xk5zs6w92xnzg851idlh2380401id1-bash-4.3-p42/bin/bash
+#!/bin/bash
 #
 # Copyright (C) 2016 Red Hat, Inc.
 #
