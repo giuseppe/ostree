@@ -2577,7 +2577,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
 
     if (socketpair (AF_UNIX, SOCK_STREAM, 0, pair) < 0)
       {
-        g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
+        glnx_set_error_from_errno (error);
         goto out;
       }
 
@@ -2604,9 +2604,9 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
     g_subprocess_launcher_setenv (launcher, "OSTREE_SUPPRESS_SYNCFS", "1", TRUE);
     // TODO: g_subprocess_launcher_set_child_setup (launcher, child_setup, NULL, NULL);
     g_subprocess_launcher_take_fd (launcher, pair[1], 3); // STDERR_FILENO + 1
-    if (pull_data->fetch_tmpdir_dfd >= 0)
+    if (pull_data->fetch_tmpdir_dfd != -1)
       {
-        g_subprocess_launcher_take_fd (launcher, pull_data->fetch_tmpdir_dfd, 4);
+        g_subprocess_launcher_take_fd (launcher, dup (pull_data->fetch_tmpdir_dfd), 4);
         subprocess = g_subprocess_launcher_spawn (launcher, error,
 //           "valgrind","--leak-check=full","--num-callers=30",
 //           "--suppressions=/home/aerg/projects/gsoc/ostree/tests/glib.supp",
@@ -2742,6 +2742,7 @@ ostree_repo_pull_with_options (OstreeRepo             *self,
   g_clear_object (&pull_data->fetcher);
   if (subprocess)
     g_subprocess_force_exit (subprocess);
+  glnx_cleanup_close_fdp (&pull_data->fetch_tmpdir_dfd);
   g_clear_object (&pull_data->remote_repo_local);
   g_free (pull_data->remote_name);
   g_free (pull_data->remote_name_or_baseurl);
