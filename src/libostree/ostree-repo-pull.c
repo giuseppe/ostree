@@ -52,7 +52,6 @@ typedef enum {
 
 typedef struct {
   OstreeRepo   *repo;
-  int           tmpdir_dfd;
   int           fetch_tmpdir_dfd;
   OstreeRepoPullFlags flags;
   char         *remote_name_or_baseurl;
@@ -2823,7 +2822,6 @@ ostree_repo_remote_fetch_summary_with_options (OstreeRepo    *self,
 
   pull_data->repo = self;
   pull_data->cancellable = cancellable;
-  pull_data->tmpdir_dfd = pull_data->repo->tmp_dir_fd;
 
   pull_data->fetch_only_summary = TRUE;
 

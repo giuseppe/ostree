@@ -44,7 +44,6 @@
 #define OSTREE_REPO_PULL_METADATA_PRIORITY (OSTREE_REPO_PULL_CONTENT_PRIORITY - 100)
 
 typedef struct {
-  OstreeRepo    *repo;
   OstreeFetcher *fetcher;
   SoupURI       *base_uri;
   GCancellable  *cancellable;
@@ -149,10 +148,10 @@ fetch_bytes_on_complete (GObject        *object,
 
   if (!bytes_data)
     {
-      g_dbus_method_invocation_return_value (invocation, g_variant_new ("ay", NULL));
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(ay)", NULL));
     }
   else
-    g_dbus_method_invocation_return_value (invocation, ot_gvariant_new_ay_bytes (bytes_data));
+    g_dbus_method_invocation_return_value (invocation, g_variant_new ("(@ay)", ot_gvariant_new_ay_bytes (bytes_data)));
 }
 
 
@@ -267,8 +266,7 @@ metalink_fetch_on_complete (GObject        *object,
       g_dbus_method_invocation_return_gerror (invocation, local_error);
     }
   else
-    g_dbus_method_invocation_return_value (invocation,
-      g_variant_new ("()"));
+    g_dbus_method_invocation_return_value (invocation, g_variant_new ("()"));
 }
 
 static gboolean handle_progress (
@@ -292,7 +290,7 @@ static gboolean handle_fetch_config (
                                     OSTREE_REPO_PULL_METADATA_PRIORITY,
                                     pull_data->cancellable,
                                     config_fetch_on_complete,
-                                    pull_data);
+                                    mk_fetch_data (pull_data, invocation ));
   soup_uri_free (uri);
   return TRUE;
 }
@@ -309,7 +307,7 @@ static gboolean handle_fetch_delta_part (
                                                   OSTREE_FETCHER_DEFAULT_PRIORITY,
                                                   pull_data->cancellable,
                                                   fetch_file_on_complete,
-                                                  invocation);
+                                                  mk_fetch_data (pull_data, invocation ));
   soup_uri_free (target_uri);
   return TRUE;
 }
@@ -326,7 +324,7 @@ static gboolean handle_fetch_delta_super (
                                     OSTREE_MAX_METADATA_SIZE,
                                     OSTREE_REPO_PULL_METADATA_PRIORITY,
                                     pull_data->cancellable,
-                                    fetch_file_on_complete,
+                                    fetch_bytes_on_complete,
                                     mk_fetch_data (pull_data, invocation ));
   soup_uri_free (target_uri);
   return TRUE;
