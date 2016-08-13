@@ -80,15 +80,15 @@ typedef struct {
   gboolean          fetch_only_summary;
 
   gboolean          is_mirror;
-  GHashTable       *requested_refs_to_fetch; /* Maps ref to commit */
-  GHashTable       *expected_commit_sizes; /* Maps commit checksum to known size */
-  GHashTable       *commits_to_fetch; /* Maps commit to itself */
+  GHashTable       *requested_refs_to_fetch; /* Maps ref name to commit checksum string */
+  GHashTable       *expected_commit_sizes; /* Maps commit checksum string to known size */
+  GHashTable       *commits_to_fetch; /* Set of commit checksum strings */
 
   gboolean          dry_run;
   gboolean          dry_run_emitted_progress;
   gboolean          require_static_deltas;
   gboolean          disable_static_deltas;
-  GHashTable       *summary_deltas_checksums;
+  GHashTable       *summary_deltas_checksums; /* Maps delta filename to checksum */
   GPtrArray        *static_delta_superblocks;
   guint             n_total_deltaparts;
   guint64           total_deltapart_size;
@@ -96,15 +96,15 @@ typedef struct {
 
   GQueue            scan_object_queue;
   GSource          *idle_src;
-  GHashTable       *requested_metadata; /* Maps object name to itself */
-  GHashTable       *scanned_metadata; /* Maps object name to itself */
+  GHashTable       *requested_metadata; /* Set of object checksums */
+  GHashTable       *scanned_metadata; /* Set of object variants */
   gint              n_scanned_metadata;
 
   char             *dir;
-  GHashTable       *requested_content; /* Maps object name to itself */
+  GHashTable       *requested_content; /* Set of object checksums */
 
   int               maxdepth;
-  GHashTable       *commit_to_depth; /* Maps commit checksum maximum depth */
+  GHashTable       *commit_to_depth; /* Maps commit checksum string to maximum depth */
   gboolean          legacy_transaction_resuming;
   gboolean          commitpartial_exists;
   gboolean          gpg_verify;
@@ -144,7 +144,7 @@ static void
 fetch_object_data_free (gpointer  data)
 {
   FetchObjectData *fetch_data = data;
-  g_free (fetch_data->checksum);
+  /* we do not free checksum because it is owned by requested_metadata or requested_content */
   g_free (fetch_data);
 }
 
@@ -397,9 +397,9 @@ scan_dirtree_object (OtPullData   *pull_data,
         }
       else if (!file_is_stored && !g_hash_table_contains (pull_data->requested_content, file_checksum))
         {
-          g_hash_table_add (pull_data->requested_content, g_strdup (file_checksum));
+          g_hash_table_add (pull_data->requested_content, file_checksum);
           fetch_object (pull_data, file_checksum, OSTREE_OBJECT_TYPE_FILE);
-          file_checksum = NULL;  /* Transfer ownership */
+          file_checksum = NULL;  /* Transfer ownership to hash table */
         }
     }
 
@@ -643,12 +643,12 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
 
   if (!is_stored && !is_requested)
     {
-      g_hash_table_add (pull_data->requested_metadata, g_strdup (tmp_checksum));
+      g_hash_table_add (pull_data->requested_metadata, tmp_checksum);
 
       if (objtype == OSTREE_OBJECT_TYPE_COMMIT)
-        fetch_object (pull_data, g_strdup (tmp_checksum), OSTREE_OBJECT_TYPE_COMMIT_META);
+        fetch_object (pull_data, tmp_checksum, OSTREE_OBJECT_TYPE_COMMIT_META);
       fetch_object (pull_data, tmp_checksum, objtype);
-      tmp_checksum = NULL;  /* Transfer ownership */
+      tmp_checksum = NULL;  /* Transfer ownership to hash table */
     }
   else if (objtype == OSTREE_OBJECT_TYPE_COMMIT && pull_data->is_commit_only)
     {
@@ -656,7 +656,7 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
                                pull_data->cancellable, error))
         goto out;
 
-      g_hash_table_insert (pull_data->scanned_metadata, g_variant_ref (object), object);
+      g_hash_table_add (pull_data->scanned_metadata, g_variant_ref (object));
       pull_data->n_scanned_metadata++;
     }
   else if (is_stored)
@@ -665,7 +665,11 @@ scan_one_metadata_object_c (OtPullData         *pull_data,
 
       /* For commits, always refetch detached metadata. */
       if (objtype == OSTREE_OBJECT_TYPE_COMMIT)
-        fetch_object (pull_data, g_strdup (tmp_checksum), OSTREE_OBJECT_TYPE_COMMIT_META);
+        {
+          char* hashtable_checksum = g_strdup (tmp_checksum);
+          g_hash_table_add (pull_data->requested_metadata, hashtable_checksum);
+          fetch_object (pull_data, hashtable_checksum, OSTREE_OBJECT_TYPE_COMMIT_META);
+        }
 
       /* For commits, check whether we only had a partial fetch */
       if (!do_scan && objtype == OSTREE_OBJECT_TYPE_COMMIT)
@@ -1005,7 +1009,7 @@ meta_fetch_on_complete (GObject           *object,
                  deleted.  */
               if (pull_data->has_tombstone_commits)
                 {
-                  fetch_object (pull_data, g_strdup (checksum), OSTREE_OBJECT_TYPE_TOMBSTONE_COMMIT);
+                  fetch_object (pull_data, checksum, OSTREE_OBJECT_TYPE_TOMBSTONE_COMMIT);
                 }
             }
         }
@@ -1051,8 +1055,8 @@ meta_fetch_on_complete (GObject           *object,
                                         pull_data->cancellable,
                                         on_metadata_written, fetch_data);
       pull_data->n_outstanding_write_requests[FETCH_METADATA]++;
+      free_fetch_data = FALSE;
     }
-  free_fetch_data = FALSE;
 
  out:
   g_assert (pull_data->n_outstanding[FETCH_METADATA] > 0);
@@ -1065,7 +1069,7 @@ meta_fetch_on_complete (GObject           *object,
 
 /**
  * fetch_object:
- * @checksum: (transfer none): checksum of object
+ * @checksum: checksum of object (assumed to be owned by a hash table)
  * @objtype: object type
  *
  * Fetches the object of the given type and checksum
@@ -1246,11 +1250,11 @@ process_one_static_delta_fallback (OtPullData   *pull_data,
         {
           if (!g_hash_table_contains (pull_data->requested_metadata, checksum))
             {
-              g_hash_table_add (pull_data->requested_metadata, g_strdup (checksum));
+              g_hash_table_add (pull_data->requested_metadata, checksum);
 
               /* Fetch metadata */
               if (objtype == OSTREE_OBJECT_TYPE_COMMIT)
-                fetch_object (pull_data, g_strdup (checksum), OSTREE_OBJECT_TYPE_COMMIT_META);
+                fetch_object (pull_data, checksum, OSTREE_OBJECT_TYPE_COMMIT_META);
 
               fetch_object (pull_data, checksum, objtype);
               checksum = NULL;  /* Transfer ownership */
@@ -1260,7 +1264,7 @@ process_one_static_delta_fallback (OtPullData   *pull_data,
         {
           if (!g_hash_table_contains (pull_data->requested_content, checksum))
             {
-              g_hash_table_add (pull_data->requested_content, g_strdup (checksum));
+              g_hash_table_add (pull_data->requested_content, checksum);
               fetch_object (pull_data, checksum, OSTREE_OBJECT_TYPE_FILE);
               checksum = NULL;  /* Transfer ownership */
             }
@@ -1338,9 +1342,11 @@ process_one_static_delta (OtPullData   *pull_data,
                                                                           error))
           goto out;
 
+        g_hash_table_add (pull_data->requested_metadata, to_checksum);
+
         fetch_data = g_new0 (FetchObjectData, 1);
         fetch_data->pull_data = pull_data;
-        fetch_data->checksum = g_strdup (to_checksum);
+        fetch_data->checksum = to_checksum;
         fetch_data->objtype = OSTREE_OBJECT_TYPE_COMMIT;
 
         to_commit = g_variant_get_child_value (delta_superblock, 4);
@@ -1350,6 +1356,9 @@ process_one_static_delta (OtPullData   *pull_data,
                                           pull_data->cancellable,
                                           on_metadata_written, fetch_data);
         pull_data->n_outstanding_write_requests[FETCH_METADATA]++;
+
+        /* Transfer ownership to requested_metadata */
+        to_checksum = NULL;
       }
   }
 
