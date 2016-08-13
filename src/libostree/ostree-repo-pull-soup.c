@@ -630,7 +630,7 @@ main (int argc, char **argv)
  out:
   if (local_error != NULL)
     {
-      g_printerr ("%serror (soup): %s%s\n", prefix, suffix, local_error->message);
+      g_printerr ("error (soup): %s\n", local_error->message);
       g_error_free (local_error);
       return 1;
     }
